@@ -4,14 +4,42 @@ Inspirado en Operação Serenata de Amor (okfn-brasil).
 
 Los valores sensibles se leen desde variables de entorno (GitHub Actions)
 con fallback al valor local para desarrollo.
+
+IMPORTANTE: NO poner tokens o secrets en este archivo.
+           Usar variables de entorno o archivo .env (no versionado).
 """
 
 import os
+from pathlib import Path
+
+# Cargar variables de entorno desde .env (si existe)
+try:
+    from dotenv import load_dotenv
+    load_dotenv(Path(__file__).parent / ".env")
+except ImportError:
+    pass  # python-dotenv no instalado, usar solo variables de entorno del sistema
 
 # ─────────────────────────── API Mercado Público ──────────────────────────── #
 # Endpoint oficial de Órdenes de Compra - Formato JSON
-API_BASE_URL: str = (
+API_OC_URL: str = (
     "https://api.mercadopublico.cl/servicios/v1/publico/ordenesdecompra.json"
+)
+# Alias de compatibilidad
+API_BASE_URL: str = API_OC_URL
+
+# Endpoint de Licitaciones
+API_LICITACIONES_URL: str = (
+    "https://api.mercadopublico.cl/servicios/v1/publico/licitaciones.json"
+)
+
+# Endpoint de búsqueda de Proveedores (por RUT)
+API_BUSCAR_PROVEEDOR_URL: str = (
+    "https://api.mercadopublico.cl/servicios/v1/Publico/Empresas/BuscarProveedor"
+)
+
+# Endpoint de búsqueda de Organismos Compradores
+API_BUSCAR_COMPRADOR_URL: str = (
+    "https://api.mercadopublico.cl/servicios/v1/Publico/Empresas/BuscarComprador"
 )
 
 # Ticket de prueba proporcionado por ChileCompra.
@@ -35,8 +63,45 @@ MIN_OBSERVATIONS: int = 5          # Mínimo de registros históricos para calcu
 # Crear un bot con @BotFather y pegar el token aquí.
 # Para obtener el chat_id, envía un mensaje al bot y consulta:
 #   https://api.telegram.org/bot<TOKEN>/getUpdates
-TELEGRAM_BOT_TOKEN: str = os.getenv("TELEGRAM_TOKEN", "7965315725:AAGSXH-uShjvfxgus5Ncu9XdKsKS8hqL5K0")
-TELEGRAM_CHAT_ID: str = os.getenv("TELEGRAM_CHAT_ID", "8498127525")
+# ⚠️ NUNCA hardcodear tokens reales aquí. Usar variables de entorno.
+TELEGRAM_BOT_TOKEN: str = os.getenv("TELEGRAM_TOKEN", "")
+TELEGRAM_CHAT_ID: str = os.getenv("TELEGRAM_CHAT_ID", "")
 
 # ─────────────────── Link directo a OC en Mercado Público ─────────────────── #
 MERCADO_PUBLICO_OC_URL: str = "https://www.mercadopublico.cl/Procurement/Modules/RFB/DetailsAcquisition.aspx?qs="
+
+# ──────────────── Clasificación Automática de Riesgo ──────────────────────── #
+# Palabras clave en nombre_comprador para clasificar categoría de riesgo
+RISK_CLASSIFICATION: dict[str, list[str]] = {
+    "MUNICIPALIDAD": ["MUNICIPALIDAD", "MUNICIPAL", "I. MUNICIPALIDAD"],
+    "FUERZAS ARMADAS/ORDEN": [
+        "EJÉRCITO", "EJERCITO", "ARMADA", "FUERZA AÉREA", "FUERZA AEREA",
+        "CARABINEROS", "PDI", "POLICÍA", "POLICIA", "GENDARMERÍA", "GENDARMERIA",
+    ],
+    "ALERTA FUNDACIONES/TRATO DIRECTO": [
+        "FUNDACIÓN", "FUNDACION", "CORPORACIÓN", "CORPORACION",
+        "ONG", "ASOCIACIÓN", "ASOCIACION",
+    ],
+    "MOP/OBRAS": [
+        "MOP", "OBRAS PÚBLICAS", "OBRAS PUBLICAS", "SERVIU",
+        "DIRECCIÓN DE VIALIDAD", "DIRECCION DE VIALIDAD",
+    ],
+}
+
+# ──────────── Códigos de tipo de OC (para filtros avanzados) ──────────────── #
+# Ref: https://api.mercadopublico.cl/ → Documentación de orden de compra
+OC_TIPO_TRATO_DIRECTO: list[str] = ["D1", "C1", "F3", "G1", "FG"]
+OC_TIPO_CONVENIO_MARCO: list[str] = ["CM"]
+OC_TIPO_COMPRA_AGIL: list[str] = ["AG", "MC", "R1"]
+
+# ──────────── Códigos de estado de OC ──────────────────────── #
+OC_ESTADO_LABELS: dict[str, str] = {
+    "4": "Enviada a Proveedor",
+    "5": "En proceso",
+    "6": "Aceptada",
+    "9": "Cancelada",
+    "12": "Recepción Conforme",
+    "13": "Pendiente de Recepcionar",
+    "14": "Recepcionada Parcialmente",
+    "15": "Recepción Conforme Incompleta",
+}

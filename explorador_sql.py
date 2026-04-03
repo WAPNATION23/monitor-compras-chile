@@ -38,7 +38,10 @@ CREATE TABLE IF NOT EXISTS ordenes_items (
     nombre_proveedor TEXT,
     fecha_creacion   TEXT,
     estado           TEXT,
-    fecha_ingreso    TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    tipo_oc          TEXT    DEFAULT '',
+    categoria_riesgo TEXT    DEFAULT 'GENERAL',
+    fecha_ingreso    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(codigo_oc, nombre_producto, precio_unitario)
 );
 """
 

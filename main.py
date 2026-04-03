@@ -3,15 +3,17 @@ Monitor de Compras Públicas de Chile — MVP
 ═══════════════════════════════════════════
 Clon chileno de "Operação Serenata de Amor".
 Descarga órdenes de compra desde la API de Mercado Público, las almacena en
-SQLite y detecta sobreprecios usando métodos estadísticos (IQR + Z-Score).
+SQLite y detecta sobreprecios usando métodos estadísticos (IQR + Z-Score)
+y modelos forenses inspirados en Rosie (Serenata).
 
 Uso:
     python main.py                   # Procesa OC de ayer
     python main.py --fecha 15032026  # Fecha específica (ddmmaaaa)
     python main.py --solo-analisis   # Solo ejecuta la detección de anomalías
+    python main.py --metodo serenata # Ejecuta todos los algoritmos forenses
 
 Requisitos:
-    pip install requests pandas numpy
+    pip install -r requirements.txt
 """
 
 from __future__ import annotations
@@ -60,9 +62,17 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--metodo",
         type=str,
-        choices=["iqr", "zscore", "both"],
-        default="both",
-        help="Método de detección: 'iqr', 'zscore', o 'both'. Default: 'both'.",
+        choices=["iqr", "zscore", "estadistico", "serenata", "all"],
+        default="serenata",
+        help=(
+            "Método de detección: "
+            "'iqr' (solo IQR), "
+            "'zscore' (solo Z-Score), "
+            "'estadistico' (IQR + Z-Score), "
+            "'serenata' (todos los algoritmos forenses), "
+            "'all' (alias de serenata). "
+            "Default: 'serenata'."
+        ),
     )
     parser.add_argument(
         "--verbose", "-v",
@@ -82,14 +92,15 @@ def _parse_args() -> argparse.Namespace:
 def run_pipeline(
     fecha: date,
     solo_analisis: bool = False,
-    metodo: str = "both",
+    metodo: str = "serenata",
     notificar_telegram: bool = False,
 ) -> None:
     """
     Ejecuta el pipeline completo:
         1. Extracción  → API de Mercado Público
-        2. Procesamiento → Flatten + SQLite
-        3. Detección     → Anomalías estadísticas
+        2. Procesamiento → Flatten + SQLite (con deduplicación)
+        3. Detección     → Anomalías estadísticas y forenses
+        4. Notificación  → Telegram (opcional)
     """
 
     print("\n" + "═" * 70)
@@ -117,36 +128,50 @@ def run_pipeline(
             df = processor.process_and_store(ordenes_raw)
             total_oc = len(ordenes_raw)
             total_items = len(df)
-            print(f"   ✓ {total_items} ítems almacenados en la base de datos.")
+            print(f"   ✓ {total_items} ítems procesados y almacenados en la base de datos.")
 
     # ── ETAPA 3: Detección de Anomalías ──────────────────── #
     print(f"\n🔍 Etapa 3: Detectando anomalías (método: {metodo})...\n")
     detector = AnomalyDetector()
+
+    # Ejecutar detect() UNA SOLA VEZ y pasar el resultado a report()
     anomalies = detector.detect(method=metodo)
-    detector.report(method=metodo)
+    detector.report_from_dataframe(anomalies)
 
     # ── ETAPA 4: Notificación a Telegram (opcional) ──────── #
     if notificar_telegram:
         print("\n📲 Etapa 4: Enviando alertas a Telegram...")
+
+        if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+            print("   ⚠ Telegram no configurado.")
+            print("   Configura las variables de entorno TELEGRAM_TOKEN y TELEGRAM_CHAT_ID.")
+            print("   (O usa: python obtener_chat_id.py para obtener tu chat_id)")
+            return
+
         try:
             tg = TelegramNotifier()
         except ValueError as exc:
             print(f"   ⚠ Telegram no configurado: {exc}")
-            print("   Configura TELEGRAM_BOT_TOKEN y TELEGRAM_CHAT_ID en config.py.")
             return
 
-        # Enviar cada anomalía como alerta individual
+        # Enviar cada anomalía como alerta individual (con anti-spam)
         enviadas: int = 0
+        omitidas: int = 0
         for _, row in anomalies.iterrows():
             try:
-                tg.enviar_alerta_desfalco(
+                result = tg.enviar_alerta_desfalco(
                     producto=row.get("nombre_producto", "N/A"),
+                    comprador=row.get("nombre_comprador", "N/A"),
                     precio_pagado=float(row.get("precio_unitario", 0)),
                     precio_promedio=float(row.get("mediana", row.get("q3", 0))),
                     z_score=float(row.get("z_score", 0)),
                     link_orden=str(row.get("codigo_oc", "")),
+                    categoria_riesgo=str(row.get("categoria_riesgo", "GENERAL")),
                 )
-                enviadas += 1
+                if result is not None:
+                    enviadas += 1
+                else:
+                    omitidas += 1
             except Exception as exc:
                 logger.warning("Error enviando alerta para %s: %s", row.get("codigo_oc"), exc)
 
@@ -157,11 +182,13 @@ def run_pipeline(
                 total_oc=total_oc,
                 total_items=total_items,
                 total_anomalias=len(anomalies),
+                alertas_enviadas=enviadas,
+                alertas_omitidas=omitidas,
             )
         except Exception as exc:
             logger.warning("Error enviando resumen diario: %s", exc)
 
-        print(f"   ✓ {enviadas} alertas enviadas a Telegram.")
+        print(f"   ✓ {enviadas} alertas enviadas a Telegram ({omitidas} omitidas por anti-spam).")
 
 
 # ──────────────────── Punto de entrada ──────────────────── #

@@ -4,6 +4,12 @@ DataProcessor
 Toma el JSON crudo de las órdenes de compra, aplana (flatten) cada ítem a una
 fila, y persiste los datos relevantes en SQLite.
 
+Mejoras respecto a la versión original:
+  • Columna `categoria_riesgo` clasificada automáticamente.
+  • Columna `tipo_oc` extraída del código de OC.
+  • Deduplicación: INSERT OR IGNORE basado en UNIQUE(codigo_oc, nombre_producto, precio_unitario).
+  • Filtro de OC canceladas (estado "9").
+
 Campos almacenados por ítem:
   • codigo_oc          – Código de la orden de compra
   • nombre_producto    – Descripción del producto/servicio
@@ -16,19 +22,22 @@ Campos almacenados por ítem:
   • rut_proveedor      – RUT del proveedor adjudicado
   • nombre_proveedor   – Nombre del proveedor
   • fecha_creacion     – Fecha de creación de la OC
-  • estado             – Estado de la OC
+  • estado             – Estado de la OC (código numérico)
+  • tipo_oc            – Tipo de OC (SE, CM, D1, etc.)
+  • categoria_riesgo   – Clasificación automática de riesgo
 """
 
 from __future__ import annotations
 
 import logging
+import re
 import sqlite3
 from pathlib import Path
 from typing import Any
 
 import pandas as pd
 
-from config import DB_NAME
+from config import DB_NAME, RISK_CLASSIFICATION
 
 logger = logging.getLogger(__name__)
 
@@ -49,18 +58,30 @@ CREATE TABLE IF NOT EXISTS ordenes_items (
     nombre_proveedor TEXT,
     fecha_creacion   TEXT,
     estado           TEXT,
-    fecha_ingreso    TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    tipo_oc          TEXT    DEFAULT '',
+    categoria_riesgo TEXT    DEFAULT 'GENERAL',
+    fecha_ingreso    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(codigo_oc, nombre_producto, precio_unitario)
 );
 """
 
-_CREATE_INDEX_SQL: str = """
-CREATE INDEX IF NOT EXISTS idx_nombre_producto
-    ON ordenes_items (nombre_producto);
-"""
+_CREATE_INDEXES_SQL: list[str] = [
+    "CREATE INDEX IF NOT EXISTS idx_nombre_producto ON ordenes_items (nombre_producto);",
+    "CREATE INDEX IF NOT EXISTS idx_categoria_riesgo ON ordenes_items (categoria_riesgo);",
+    "CREATE INDEX IF NOT EXISTS idx_rut_proveedor ON ordenes_items (rut_proveedor);",
+    "CREATE INDEX IF NOT EXISTS idx_rut_comprador ON ordenes_items (rut_comprador);",
+    "CREATE INDEX IF NOT EXISTS idx_fecha_creacion ON ordenes_items (fecha_creacion);",
+]
+
+# Migración: agregar columnas si faltan (para BD existentes)
+_MIGRATION_COLUMNS: list[tuple[str, str]] = [
+    ("tipo_oc", "TEXT DEFAULT ''"),
+    ("categoria_riesgo", "TEXT DEFAULT 'GENERAL'"),
+]
 
 
 class DataProcessor:
-    """Aplana las OC y las persiste en SQLite."""
+    """Aplana las OC y las persiste en SQLite con deduplicación y clasificación."""
 
     def __init__(self, db_path: str | Path = DB_NAME) -> None:
         self.db_path = Path(db_path)
@@ -69,16 +90,62 @@ class DataProcessor:
     # ─────────────────── Inicialización de la BD ──────────────────── #
 
     def _init_db(self) -> None:
-        """Crea la tabla e índices si no existen."""
+        """Crea la tabla, índices y ejecuta migraciones si es necesario."""
         try:
             with sqlite3.connect(self.db_path) as conn:
                 conn.execute(_CREATE_TABLE_SQL)
-                conn.execute(_CREATE_INDEX_SQL)
+                for idx_sql in _CREATE_INDEXES_SQL:
+                    conn.execute(idx_sql)
+
+                # Migraciones: agregar columnas faltantes  
+                for col_name, col_def in _MIGRATION_COLUMNS:
+                    try:
+                        conn.execute(
+                            f"ALTER TABLE ordenes_items ADD COLUMN {col_name} {col_def}"
+                        )
+                        logger.info("Migración: columna '%s' agregada.", col_name)
+                    except sqlite3.OperationalError:
+                        pass  # Columna ya existe
+
                 conn.commit()
             logger.info("Base de datos inicializada: %s", self.db_path)
         except sqlite3.Error as exc:
             logger.error("Error inicializando la BD: %s", exc)
             raise
+
+    # ──────────────── Clasificación de riesgo ─────────────── #
+
+    @staticmethod
+    def _classify_risk(nombre_comprador: str) -> str:
+        """
+        Clasifica la categoría de riesgo basándose en el nombre del comprador.
+        Retorna la categoría que coincida con las palabras clave, o 'GENERAL'.
+        """
+        if not nombre_comprador:
+            return "GENERAL"
+
+        upper = nombre_comprador.upper()
+        for categoria, keywords in RISK_CLASSIFICATION.items():
+            for keyword in keywords:
+                if keyword in upper:
+                    return categoria
+        return "GENERAL"
+
+    # ──────────────── Extraer tipo de OC del código ─────────────── #
+
+    @staticmethod
+    def _extract_tipo_oc(codigo_oc: str) -> str:
+        """
+        Extrae el tipo de OC del código.
+        Ejemplo: '2097-241-SE14' → 'SE'
+                 '3401-120-CM26' → 'CM'
+                 '7310-305-D126' → 'D1'
+        """
+        if not codigo_oc:
+            return ""
+        # El tipo de OC está en la última parte del código, antes de los dígitos finales
+        match = re.search(r"-([A-Z]{1,2})\d+$", codigo_oc)
+        return match.group(1) if match else ""
 
     # ──────────────── Flatten: JSON crudo → DataFrame ─────────────── #
 
@@ -128,6 +195,10 @@ class DataProcessor:
         rut_proveedor: str = proveedor.get("RutProveedor", "")
         nombre_proveedor: str = proveedor.get("Nombre", "")
 
+        # Tipo de OC y clasificación de riesgo
+        tipo_oc: str = DataProcessor._extract_tipo_oc(codigo_oc)
+        categoria_riesgo: str = DataProcessor._classify_risk(nombre_comprador)
+
         # Ítems
         items_wrapper: dict[str, Any] = oc.get("Items", {})
         items: list[dict[str, Any]] = items_wrapper.get("Listado", [])
@@ -150,6 +221,8 @@ class DataProcessor:
                     "nombre_proveedor": nombre_proveedor,
                     "fecha_creacion": fecha_creacion,
                     "estado": estado,
+                    "tipo_oc": tipo_oc,
+                    "categoria_riesgo": categoria_riesgo,
                 }
             )
 
@@ -159,22 +232,33 @@ class DataProcessor:
 
     def process_and_store(self, ordenes: list[dict[str, Any]]) -> pd.DataFrame:
         """
-        Aplana todas las OC y las guarda en SQLite.
+        Aplana todas las OC y las guarda en SQLite con deduplicación.
 
         Args:
             ordenes: Lista de dicts (JSON crudo del detalle de cada OC).
 
         Returns:
-            DataFrame de Pandas con los datos aplanados.
+            DataFrame de Pandas con los datos aplanados (solo nuevos insertados).
         """
         all_rows: list[dict[str, Any]] = []
+        skipped_cancelled: int = 0
+
         for oc in ordenes:
+            # Filtrar OC canceladas (estado "9")
+            estado = str(oc.get("CodigoEstado", ""))
+            if estado == "9":
+                skipped_cancelled += 1
+                continue
+
             try:
                 all_rows.extend(self._flatten_oc(oc))
             except Exception as exc:
                 logger.warning(
                     "Error aplanando OC %s: %s", oc.get("Codigo", "?"), exc
                 )
+
+        if skipped_cancelled:
+            logger.info("Omitidas %d OC canceladas (estado 9).", skipped_cancelled)
 
         if not all_rows:
             logger.warning("No se obtuvieron ítems para almacenar.")
@@ -186,13 +270,41 @@ class DataProcessor:
         df = df[df["precio_unitario"] > 0].copy()
         df["nombre_producto"] = df["nombre_producto"].str.strip().str.upper()
 
-        # Persistir en SQLite (append)
+        # Persistir en SQLite con deduplicación (INSERT OR IGNORE)
+        inserted: int = 0
         try:
             with sqlite3.connect(self.db_path) as conn:
-                df.to_sql("ordenes_items", conn, if_exists="append", index=False)
+                for _, row in df.iterrows():
+                    try:
+                        conn.execute(
+                            """
+                            INSERT OR IGNORE INTO ordenes_items
+                                (codigo_oc, nombre_producto, categoria, cantidad,
+                                 precio_unitario, monto_total_item, rut_comprador,
+                                 nombre_comprador, rut_proveedor, nombre_proveedor,
+                                 fecha_creacion, estado, tipo_oc, categoria_riesgo)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            """,
+                            (
+                                row["codigo_oc"], row["nombre_producto"],
+                                row["categoria"], row["cantidad"],
+                                row["precio_unitario"], row["monto_total_item"],
+                                row["rut_comprador"], row["nombre_comprador"],
+                                row["rut_proveedor"], row["nombre_proveedor"],
+                                row["fecha_creacion"], row["estado"],
+                                row["tipo_oc"], row["categoria_riesgo"],
+                            ),
+                        )
+                        if conn.total_changes:
+                            inserted += 1
+                    except sqlite3.IntegrityError:
+                        pass  # Registro duplicado, ignorar
+
+                conn.commit()
+
             logger.info(
-                "✓ %d ítems almacenados en %s (tabla 'ordenes_items').",
-                len(df), self.db_path,
+                "✓ %d nuevos ítems almacenados en %s (%d duplicados omitidos).",
+                inserted, self.db_path, len(df) - inserted,
             )
         except sqlite3.Error as exc:
             logger.error("Error escribiendo en la BD: %s", exc)

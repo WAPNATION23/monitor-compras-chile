@@ -5,9 +5,12 @@ Clase encargada de conectarse a la API pública de Mercado Público (ChileCompra
 y descargar las órdenes de compra de una fecha específica.
 
 Maneja:
-  • Paginación automática (la API no pagina, pero el listado puede venir truncado).
+  • Paginación automática (la API retorna lotes de hasta ~100 OC).
   • Reintentos con back-off exponencial ante errores de red.
-  • Consulta del detalle de cada OC para obtener los ítems.
+  • Rate limiting inteligente (1 req/seg para evitar "peticiones simultáneas").
+  • Límite configurable de OC a descargar por ejecución.
+  • Modo rápido: extrae solo el listado SIN consultar detalle individual.
+  • Modo completo: extrae listado + detalle de cada OC (lento pero completo).
 """
 
 from __future__ import annotations
@@ -28,6 +31,11 @@ from config import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Máximo de OC a descargar en detalle por ejecución (para evitar spam a la API)
+MAX_OC_PER_RUN: int = 200
+# Delay entre requests individuales al API (segundos)
+REQUEST_DELAY: float = 1.0
 
 
 class MercadoPublicoExtractor:
@@ -71,18 +79,18 @@ class MercadoPublicoExtractor:
 
     # ────────── Paso 1: Listar códigos de OC de una fecha ──────── #
 
-    def _fetch_oc_codes(self, fecha: date) -> list[str]:
+    def _fetch_oc_codes(self, fecha: date) -> list[dict[str, Any]]:
         """
-        Obtiene los códigos de todas las OC publicadas en *fecha*.
+        Obtiene el listado de OC publicadas en *fecha*.
 
-        La API retorna un listado con los códigos que luego deben consultarse
-        individualmente para obtener el detalle con ítems.
+        Retorna el listado básico (código, nombre, estado) que ya incluye
+        información útil sin necesidad de consultar cada OC individualmente.
 
         Args:
             fecha: Fecha de consulta.
 
         Returns:
-            Lista de códigos de OC (ej. ["2097-241-SE14", ...]).
+            Lista de dicts con info básica de cada OC.
         """
         # Formato requerido: ddmmaaaa
         fecha_str: str = fecha.strftime("%d%m%Y")
@@ -93,15 +101,14 @@ class MercadoPublicoExtractor:
 
         data: dict[str, Any] = self._get_with_retry(API_BASE_URL, params)
 
-        # La respuesta tiene la forma:
-        # { "Cantidad": N, "Listado": [ { "Codigo": "...", ... }, ... ] }
+        cantidad_total: int = data.get("Cantidad", 0)
         listado: list[dict[str, Any]] = data.get("Listado", [])
-        codigos: list[str] = [oc["Codigo"] for oc in listado if "Codigo" in oc]
 
         logger.info(
-            "Fecha %s → %d órdenes de compra encontradas.", fecha_str, len(codigos)
+            "Fecha %s → %d OC encontradas (API reporta %d total).",
+            fecha_str, len(listado), cantidad_total,
         )
-        return codigos
+        return listado
 
     # ────────── Paso 2: Detalle de una OC individual ───────────── #
 
@@ -122,7 +129,6 @@ class MercadoPublicoExtractor:
 
         try:
             data: dict[str, Any] = self._get_with_retry(API_BASE_URL, params)
-            # El detalle viene anidado bajo "Listado" → primer elemento
             listado: list[dict[str, Any]] = data.get("Listado", [])
             if listado:
                 return listado[0]
@@ -132,28 +138,80 @@ class MercadoPublicoExtractor:
             logger.error("No se pudo obtener detalle de OC %s: %s", codigo, exc)
             return None
 
-    # ───────────── Método público: pipeline completo ────────────── #
+    # ───────────── Método público: extracción RÁPIDA ────────────── #
 
-    def extract(self, fecha: date) -> list[dict[str, Any]]:
+    def extract_fast(self, fecha: date) -> list[dict[str, Any]]:
+        """
+        Extracción rápida: solo obtiene el listado (sin detalle de ítems).
+
+        Útil para:
+          • Obtener una visión general del volumen de compras
+          • Filtrar antes de hacer la extracción completa
+          • Estadísticas de cantidad de OC por día
+
+        Returns:
+            Lista de dicts con info básica {Codigo, Nombre, CodigoEstado}.
+        """
+        return self._fetch_oc_codes(fecha)
+
+    # ───────────── Método público: extracción COMPLETA ────────────── #
+
+    def extract(
+        self,
+        fecha: date,
+        max_oc: int = MAX_OC_PER_RUN,
+        delay: float = REQUEST_DELAY,
+    ) -> list[dict[str, Any]]:
         """
         Pipeline completo: lista OC → descarga detalle de cada una.
 
+        Con 18,000+ OC diarias, se limita a `max_oc` para no saturar la API.
+        Las OC se seleccionan priorizando las más recientes.
+
         Args:
             fecha: Fecha de las órdenes de compra a extraer.
+            max_oc: Máximo de OC a descargar en detalle (default: 200).
+            delay: Segundos de espera entre cada request (default: 1.0).
 
         Returns:
             Lista de dicts con el detalle completo de cada OC.
         """
-        codigos: list[str] = self._fetch_oc_codes(fecha)
+        listado: list[dict[str, Any]] = self._fetch_oc_codes(fecha)
+
+        if not listado:
+            return []
+
+        # Limitar la cantidad de OC a procesar
+        codigos: list[str] = [oc["Codigo"] for oc in listado if "Codigo" in oc]
+
+        if len(codigos) > max_oc:
+            logger.info(
+                "Limitando a %d OC de %d disponibles (día %s).",
+                max_oc, len(codigos), fecha.strftime("%d/%m/%Y"),
+            )
+            codigos = codigos[:max_oc]
+
         detalles: list[dict[str, Any]] = []
+        errores: int = 0
 
         for i, codigo in enumerate(codigos, start=1):
-            logger.info("Descargando detalle %d/%d: %s", i, len(codigos), codigo)
+            if i % 50 == 0 or i == 1:
+                logger.info(
+                    "Progreso: %d/%d OC descargadas (%d errores)...",
+                    i, len(codigos), errores,
+                )
+
             detalle: dict[str, Any] | None = self._fetch_oc_detail(codigo)
             if detalle is not None:
                 detalles.append(detalle)
-            # Pausa cortés para no saturar la API
-            time.sleep(0.3)
+            else:
+                errores += 1
 
-        logger.info("Extracción finalizada: %d OC descargadas.", len(detalles))
+            # Rate limiting — respetar la API
+            time.sleep(delay)
+
+        logger.info(
+            "Extracción finalizada: %d OC descargadas (%d errores de %d intentos).",
+            len(detalles), errores, len(codigos),
+        )
         return detalles

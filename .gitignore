@@ -15,5 +15,14 @@ venv/
 .DS_Store
 Thumbs.db
 
+# Secretos — NUNCA commitear tokens
+.env
+*.env
+
 # Datos locales (la BD se commitea intencionalmente para persistencia en Actions)
 # auditoria_estado.db
+
+# Archivos temporales de test
+test_*_tmp.py
+
+*.csv

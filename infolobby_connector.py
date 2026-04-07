@@ -174,6 +174,9 @@ class InfoLobbyConnector:
             nombre: Nombre (parcial) de la autoridad.
             limit: Máximo de resultados.
         """
+        # Sanitizar input para prevenir SPARQL injection
+        nombre_safe = nombre.replace("\\", "\\\\").replace('"', '\\"').replace("'", "\\'")
+        limit = min(max(int(limit), 1), 1000)
         sparql = f"""
         PREFIX lobby: <http://datos.infolobby.cl/def#>
         PREFIX foaf: <http://xmlns.com/foaf/0.1/>
@@ -189,7 +192,7 @@ class InfoLobbyConnector:
             ?sa foaf:name ?sujetoActivo .
             OPTIONAL {{ ?sp lobby:institucion ?inst . ?inst foaf:name ?institucion . }}
             OPTIONAL {{ ?audiencia lobby:materia ?materia . }}
-            FILTER(CONTAINS(LCASE(?sujetoPasivo), LCASE("{nombre}")))
+            FILTER(CONTAINS(LCASE(?sujetoPasivo), LCASE("{nombre_safe}")))
         }}
         ORDER BY DESC(?fecha)
         LIMIT {limit}
@@ -207,6 +210,9 @@ class InfoLobbyConnector:
             nombre_empresa: Nombre (parcial) de la empresa.
             limit: Máximo de resultados.
         """
+        # Sanitizar input para prevenir SPARQL injection
+        nombre_safe = nombre_empresa.replace("\\", "\\\\").replace('"', '\\"').replace("'", "\\'")
+        limit = min(max(int(limit), 1), 1000)
         sparql = f"""
         PREFIX lobby: <http://datos.infolobby.cl/def#>
         PREFIX foaf: <http://xmlns.com/foaf/0.1/>
@@ -222,7 +228,7 @@ class InfoLobbyConnector:
             ?sa foaf:name ?sujetoActivo .
             OPTIONAL {{ ?sp lobby:institucion ?inst . ?inst foaf:name ?institucion . }}
             OPTIONAL {{ ?audiencia lobby:materia ?materia . }}
-            FILTER(CONTAINS(LCASE(?sujetoActivo), LCASE("{nombre_empresa}")))
+            FILTER(CONTAINS(LCASE(?sujetoActivo), LCASE("{nombre_safe}")))
         }}
         ORDER BY DESC(?fecha)
         LIMIT {limit}

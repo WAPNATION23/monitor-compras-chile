@@ -7,7 +7,7 @@ fila, y persiste los datos relevantes en SQLite.
 Mejoras respecto a la versión original:
   • Columna `categoria_riesgo` clasificada automáticamente.
   • Columna `tipo_oc` extraída del código de OC.
-  • Deduplicación: INSERT OR IGNORE basado en UNIQUE(codigo_oc, nombre_producto, precio_unitario).
+  • Deduplicación: INSERT OR IGNORE basado en UNIQUE(codigo_oc, nombre_producto, precio_unitario, cantidad).
   • Filtro de OC canceladas (estado "9").
 
 Campos almacenados por ítem:
@@ -61,7 +61,7 @@ CREATE TABLE IF NOT EXISTS ordenes_items (
     tipo_oc          TEXT    DEFAULT '',
     categoria_riesgo TEXT    DEFAULT 'GENERAL',
     fecha_ingreso    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(codigo_oc, nombre_producto, precio_unitario)
+    UNIQUE(codigo_oc, nombre_producto, precio_unitario, cantidad)
 );
 """
 
@@ -107,11 +107,60 @@ class DataProcessor:
                     except sqlite3.OperationalError:
                         pass  # Columna ya existe
 
+                # Migración: actualizar UNIQUE constraint si falta 'cantidad'
+                self._migrate_unique_constraint(conn)
+
                 conn.commit()
             logger.info("Base de datos inicializada: %s", self.db_path)
         except sqlite3.Error as exc:
             logger.error("Error inicializando la BD: %s", exc)
             raise
+
+    @staticmethod
+    def _migrate_unique_constraint(conn: sqlite3.Connection) -> None:
+        """
+        Detecta si la tabla usa el constraint viejo (sin 'cantidad') y
+        la reconstruye con el constraint correcto.
+        SQLite no soporta ALTER CONSTRAINT, así que se hace via tabla temporal.
+        """
+        # Leer el SQL original de CREATE TABLE desde sqlite_master
+        row = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='ordenes_items'"
+        ).fetchone()
+        if row is None:
+            return
+
+        create_sql: str = row[0]
+        # Si la constraint ya incluye 'cantidad', ya está migrada
+        if "cantidad" in create_sql.split("UNIQUE")[-1]:
+            return
+
+        logger.info(
+            "Migración: reconstruyendo tabla para actualizar UNIQUE constraint "
+            "(agregando 'cantidad')."
+        )
+
+        conn.execute("ALTER TABLE ordenes_items RENAME TO _ordenes_items_old")
+        conn.execute(_CREATE_TABLE_SQL)
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO ordenes_items
+                (id, codigo_oc, nombre_producto, categoria, cantidad,
+                 precio_unitario, monto_total_item, rut_comprador,
+                 nombre_comprador, rut_proveedor, nombre_proveedor,
+                 fecha_creacion, estado, tipo_oc, categoria_riesgo,
+                 fecha_ingreso)
+            SELECT
+                id, codigo_oc, nombre_producto, categoria, cantidad,
+                precio_unitario, monto_total_item, rut_comprador,
+                nombre_comprador, rut_proveedor, nombre_proveedor,
+                fecha_creacion, estado, tipo_oc, categoria_riesgo,
+                fecha_ingreso
+            FROM _ordenes_items_old
+            """
+        )
+        conn.execute("DROP TABLE _ordenes_items_old")
+        logger.info("Migración de UNIQUE constraint completada.")
 
     # ──────────────── Clasificación de riesgo ─────────────── #
 
@@ -143,8 +192,9 @@ class DataProcessor:
         """
         if not codigo_oc:
             return ""
-        # El tipo de OC está en la última parte del código, antes de los dígitos finales
-        match = re.search(r"-([A-Z]{1,2})\d+$", codigo_oc)
+        # El tipo de OC son los 2 caracteres alfanuméricos tras el último guión,
+        # antes de los dígitos secuenciales (ej. D1, SE, CM, AG, R1)
+        match = re.search(r"-([A-Z][A-Z0-9])\d+$", codigo_oc)
         return match.group(1) if match else ""
 
     # ──────────────── Flatten: JSON crudo → DataFrame ─────────────── #
@@ -183,7 +233,10 @@ class DataProcessor:
         """
         codigo_oc: str = oc.get("Codigo", "DESCONOCIDO")
         estado: str = str(oc.get("CodigoEstado", ""))
-        fecha_creacion: str = oc.get("FechaCreacion", "")
+        fechas: dict[str, Any] = oc.get("Fechas", {})
+        fecha_creacion: str = (
+            fechas.get("FechaCreacion", "") if isinstance(fechas, dict) else ""
+        ) or oc.get("FechaCreacion", "")
 
         # Comprador
         comprador: dict[str, Any] = oc.get("Comprador", {})
@@ -230,7 +283,7 @@ class DataProcessor:
 
     # ───────────── Procesamiento masivo + almacenamiento ──────────── #
 
-    def process_and_store(self, ordenes: list[dict[str, Any]]) -> pd.DataFrame:
+    def process_and_store(self, ordenes: list[dict[str, Any]]) -> tuple[pd.DataFrame, int]:
         """
         Aplana todas las OC y las guarda en SQLite con deduplicación.
 
@@ -238,7 +291,7 @@ class DataProcessor:
             ordenes: Lista de dicts (JSON crudo del detalle de cada OC).
 
         Returns:
-            DataFrame de Pandas con los datos aplanados (solo nuevos insertados).
+            Tupla (DataFrame aplanado, cantidad de nuevos ítems insertados).
         """
         all_rows: list[dict[str, Any]] = []
         skipped_cancelled: int = 0
@@ -262,7 +315,7 @@ class DataProcessor:
 
         if not all_rows:
             logger.warning("No se obtuvieron ítems para almacenar.")
-            return pd.DataFrame()
+            return pd.DataFrame(), 0
 
         df: pd.DataFrame = pd.DataFrame(all_rows)
 
@@ -274,33 +327,36 @@ class DataProcessor:
         inserted: int = 0
         try:
             with sqlite3.connect(self.db_path) as conn:
-                for _, row in df.iterrows():
-                    try:
-                        conn.execute(
-                            """
-                            INSERT OR IGNORE INTO ordenes_items
-                                (codigo_oc, nombre_producto, categoria, cantidad,
-                                 precio_unitario, monto_total_item, rut_comprador,
-                                 nombre_comprador, rut_proveedor, nombre_proveedor,
-                                 fecha_creacion, estado, tipo_oc, categoria_riesgo)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                            """,
-                            (
-                                row["codigo_oc"], row["nombre_producto"],
-                                row["categoria"], row["cantidad"],
-                                row["precio_unitario"], row["monto_total_item"],
-                                row["rut_comprador"], row["nombre_comprador"],
-                                row["rut_proveedor"], row["nombre_proveedor"],
-                                row["fecha_creacion"], row["estado"],
-                                row["tipo_oc"], row["categoria_riesgo"],
-                            ),
-                        )
-                        if conn.total_changes:
-                            inserted += 1
-                    except sqlite3.IntegrityError:
-                        pass  # Registro duplicado, ignorar
-
+                before_count = conn.execute("SELECT COUNT(*) FROM ordenes_items").fetchone()[0]
+                
+                records = [
+                    (
+                        row["codigo_oc"], row["nombre_producto"],
+                        row["categoria"], row["cantidad"],
+                        row["precio_unitario"], row["monto_total_item"],
+                        row["rut_comprador"], row["nombre_comprador"],
+                        row["rut_proveedor"], row["nombre_proveedor"],
+                        row["fecha_creacion"], row["estado"],
+                        row["tipo_oc"], row["categoria_riesgo"],
+                    )
+                    for row in df.to_dict("records")
+                ]
+                
+                conn.executemany(
+                    """
+                    INSERT OR IGNORE INTO ordenes_items
+                        (codigo_oc, nombre_producto, categoria, cantidad,
+                         precio_unitario, monto_total_item, rut_comprador,
+                         nombre_comprador, rut_proveedor, nombre_proveedor,
+                         fecha_creacion, estado, tipo_oc, categoria_riesgo)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    records,
+                )
                 conn.commit()
+                
+                after_count = conn.execute("SELECT COUNT(*) FROM ordenes_items").fetchone()[0]
+                inserted = after_count - before_count
 
             logger.info(
                 "✓ %d nuevos ítems almacenados en %s (%d duplicados omitidos).",
@@ -310,4 +366,4 @@ class DataProcessor:
             logger.error("Error escribiendo en la BD: %s", exc)
             raise
 
-        return df
+        return df, inserted

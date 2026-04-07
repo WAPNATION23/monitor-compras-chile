@@ -19,10 +19,18 @@ Thumbs.db
 .env
 *.env
 
-# Datos locales (la BD se commitea intencionalmente para persistencia en Actions)
-# auditoria_estado.db
+# Datos locales
+# La BD se genera localmente con main.py — cada usuario crea la suya.
+auditoria_estado.db
+*.db-journal
 
 # Archivos temporales de test
 test_*_tmp.py
+tmp_*.py
+oc_dump.json
+oc_output.txt
+*.log
 
 *.csv
+
+.early.coverage

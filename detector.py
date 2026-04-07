@@ -251,7 +251,7 @@ class AnomalyDetector:
         df_valid = df.dropna(subset=["rut_proveedor", "monto_total_item"]).copy()
         df_valid = df_valid[df_valid["monto_total_item"] >= 10]
         
-        df_valid["primer_digito"] = df_valid["monto_total_item"].astype(str).str[0].astype(int)
+        df_valid["primer_digito"] = df_valid["monto_total_item"].apply(lambda x: int(str(int(abs(x)))[0]))
         
         outliers_list = []
         for rut, group in df_valid.groupby("rut_proveedor"):
@@ -290,7 +290,8 @@ class AnomalyDetector:
         regex_humo = "ASESORÍA|ASESORIA|ESTUDIO|CONSULTORÍA|CONSULTORIA|CAPACITACIÓN|EVALUACIÓN"
         mask_humo = df_valid["nombre_producto"].str.upper().str.contains(regex_humo)
         
-        mask_redondo = (df_valid["monto_total_item"] >= 5_000_000) & (df_valid["monto_total_item"] % 1_000_000 == 0)
+        import numpy as np
+        mask_redondo = (df_valid["monto_total_item"] >= 5_000_000) & (np.isclose(df_valid["monto_total_item"] % 1_000_000, 0, atol=0.01))
         
         is_spider = mask_humo & mask_redondo
         outliers = df_valid[is_spider].copy()

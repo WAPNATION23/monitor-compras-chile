@@ -44,7 +44,7 @@ API_BUSCAR_COMPRADOR_URL: str = (
 
 # Ticket de prueba proporcionado por ChileCompra.
 # Para producción, solicitar uno propio en https://api.mercadopublico.cl → "Solicitud de Ticket".
-API_TICKET: str = os.getenv("MERCADO_PUBLICO_TICKET", "F8537A18-6766-4DEF-9E59-426B4FEE2844")
+API_TICKET: str = os.getenv("MERCADO_PUBLICO_TICKET", "")
 
 # ──────────────────────────── Base de datos ────────────────────────────────── #
 DB_NAME: str = "auditoria_estado.db"

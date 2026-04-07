@@ -19,8 +19,10 @@ Requisitos:
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import sys
+import time
 from datetime import date, timedelta
 
 from extractor import MercadoPublicoExtractor
@@ -34,18 +36,50 @@ logger = logging.getLogger(__name__)
 
 # ──────────────────── Configuración de Logging ──────────────────── #
 
-def _setup_logging(verbose: bool = False) -> None:
-    """Configura el logging con formato legible."""
+class _JsonFormatter(logging.Formatter):
+    """Emite cada registro como una línea JSON con pares clave-valor."""
+
+    def format(self, record: logging.LogRecord) -> str:
+        entry = {
+            "ts": self.formatTime(record, "%Y-%m-%dT%H:%M:%S"),
+            "level": record.levelname,
+            "logger": record.name,
+            "msg": record.getMessage(),
+        }
+        if record.exc_info and record.exc_info[0]:
+            entry["exc"] = self.formatException(record.exc_info)
+        if hasattr(record, "event"):
+            entry["event"] = record.event
+        for key, value in record.__dict__.items():
+            if key.startswith("_") or key in {
+                "args", "asctime", "created", "exc_info", "exc_text", "filename",
+                "funcName", "levelname", "levelno", "lineno", "module", "msecs",
+                "message", "msg", "name", "pathname", "process", "processName",
+                "relativeCreated", "stack_info", "thread", "threadName", "taskName",
+                "event",
+            }:
+                continue
+            entry[key] = value
+        return json.dumps(entry, ensure_ascii=False)
+
+
+def _setup_logging(verbose: bool = False, json_fmt: bool = True) -> None:
+    """Configura el logging. json_fmt=True da salida JSON estructurada."""
     level: int = logging.DEBUG if verbose else logging.INFO
-    fmt: str = "%(asctime)s │ %(levelname)-8s │ %(name)-25s │ %(message)s"
-    logging.basicConfig(level=level, format=fmt, datefmt="%Y-%m-%d %H:%M:%S")
+    handler = logging.StreamHandler()
+    if json_fmt:
+        handler.setFormatter(_JsonFormatter())
+    else:
+        fmt = "%(asctime)s │ %(levelname)-8s │ %(name)-25s │ %(message)s"
+        handler.setFormatter(logging.Formatter(fmt, datefmt="%Y-%m-%d %H:%M:%S"))
+    logging.basicConfig(level=level, handlers=[handler])
 
 
 # ──────────────────── Parsing de argumentos ──────────────────── #
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="🇨🇱 Monitor Ciudadano de Compras Públicas — Chile",
+        description="Monitor Ciudadano de Compras Publicas - Chile",
         epilog="Inspirado en Operação Serenata de Amor (Brasil).",
     )
     parser.add_argument(
@@ -84,6 +118,11 @@ def _parse_args() -> argparse.Namespace:
         action="store_true",
         help="Enviar alertas de anomalías a Telegram (requiere config).",
     )
+    parser.add_argument(
+        "--no-json",
+        action="store_true",
+        help="Usar formato de log legible en vez de JSON.",
+    )
     return parser.parse_args()
 
 
@@ -110,12 +149,22 @@ def run_pipeline(
 
     total_oc: int = 0
     total_items: int = 0
+    t_start = time.perf_counter()
 
     if not solo_analisis:
         # ── ETAPA 1: Extracción ──────────────────────────────── #
         print(f"\n📥 Etapa 1: Extrayendo OC de {fecha.strftime('%d/%m/%Y')}...")
+        t_extract = time.perf_counter()
         extractor = MercadoPublicoExtractor()
         ordenes_raw = extractor.extract(fecha)
+        logger.info(
+            "Extracción completada.",
+            extra={
+                "event": "extraction_complete",
+                "duration_s": round(time.perf_counter() - t_extract, 1),
+                "ocs": len(ordenes_raw) if ordenes_raw else 0,
+            },
+        )
 
         if not ordenes_raw:
             print("⚠  No se encontraron órdenes de compra para esa fecha.")
@@ -124,19 +173,67 @@ def run_pipeline(
         else:
             # ── ETAPA 2: Procesamiento ───────────────────────── #
             print(f"\n🔄 Etapa 2: Procesando {len(ordenes_raw)} órdenes de compra...")
+            t_process = time.perf_counter()
             processor = DataProcessor()
-            df = processor.process_and_store(ordenes_raw)
+            df, inserted = processor.process_and_store(ordenes_raw)
             total_oc = len(ordenes_raw)
             total_items = len(df)
-            print(f"   ✓ {total_items} ítems procesados y almacenados en la base de datos.")
+            logger.info(
+                "Procesamiento completado.",
+                extra={
+                    "event": "processing_complete",
+                    "duration_s": round(time.perf_counter() - t_process, 1),
+                    "items": total_items,
+                },
+            )
+
+            # Métricas de calidad de datos
+            if total_items > 0:
+                vacios_producto = df["nombre_producto"].isna().sum() + (df["nombre_producto"] == "").sum()
+                vacios_fecha = df["fecha_creacion"].isna().sum() + (df["fecha_creacion"] == "").sum()
+                vacios_rut = df["rut_proveedor"].isna().sum() + (df["rut_proveedor"] == "").sum()
+                logger.info(
+                    "Calidad de datos calculada.",
+                    extra={
+                        "event": "data_quality",
+                        "items": total_items,
+                        "empty_product": int(vacios_producto),
+                        "empty_date": int(vacios_fecha),
+                        "empty_rut": int(vacios_rut),
+                        "pct_product": round(100 * vacios_producto / total_items, 1),
+                        "pct_date": round(100 * vacios_fecha / total_items, 1),
+                        "pct_rut": round(100 * vacios_rut / total_items, 1),
+                    },
+                )
+
+            print(f"   ✓ {inserted} nuevos ítems almacenados ({total_items} procesados, {total_items - inserted} duplicados omitidos).")
 
     # ── ETAPA 3: Detección de Anomalías ──────────────────── #
     print(f"\n🔍 Etapa 3: Detectando anomalías (método: {metodo})...\n")
+    t_detect = time.perf_counter()
     detector = AnomalyDetector()
 
     # Ejecutar detect() UNA SOLA VEZ y pasar el resultado a report()
     anomalies = detector.detect(method=metodo)
     detector.report_from_dataframe(anomalies)
+    logger.info(
+        "Detección completada.",
+        extra={
+            "event": "detection_complete",
+            "duration_s": round(time.perf_counter() - t_detect, 1),
+            "anomalies": len(anomalies),
+        },
+    )
+    logger.info(
+        "Pipeline completado.",
+        extra={
+            "event": "pipeline_complete",
+            "duration_s": round(time.perf_counter() - t_start, 1),
+            "ocs": total_oc,
+            "items": total_items,
+            "anomalies": len(anomalies),
+        },
+    )
 
     # ── ETAPA 4: Notificación a Telegram (opcional) ──────── #
     if notificar_telegram:
@@ -195,7 +292,7 @@ def run_pipeline(
 
 if __name__ == "__main__":
     args: argparse.Namespace = _parse_args()
-    _setup_logging(verbose=args.verbose)
+    _setup_logging(verbose=args.verbose, json_fmt=not args.no_json)
 
     # Determinar la fecha de consulta
     if args.fecha:

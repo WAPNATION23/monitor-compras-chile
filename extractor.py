@@ -5,7 +5,7 @@ Clase encargada de conectarse a la API pública de Mercado Público (ChileCompra
 y descargar las órdenes de compra de una fecha específica.
 
 Maneja:
-  • Paginación automática (la API retorna lotes de hasta ~100 OC).
+  • Paginación por estado cuando la API trunca resultados.
   • Reintentos con back-off exponencial ante errores de red.
   • Rate limiting inteligente (1 req/seg para evitar "peticiones simultáneas").
   • Límite configurable de OC a descargar por ejecución.
@@ -28,6 +28,7 @@ from config import (
     MAX_RETRIES,
     REQUEST_TIMEOUT,
     RETRY_BACKOFF,
+    OC_ESTADO_LABELS,
 )
 
 logger = logging.getLogger(__name__)
@@ -83,8 +84,9 @@ class MercadoPublicoExtractor:
         """
         Obtiene el listado de OC publicadas en *fecha*.
 
-        Retorna el listado básico (código, nombre, estado) que ya incluye
-        información útil sin necesidad de consultar cada OC individualmente.
+        Si la respuesta inicial está truncada (menos resultados de los que
+        reporta la API), reintenta con filtros por código de estado para
+        obtener la mayor cantidad posible de OCs.
 
         Args:
             fecha: Fecha de consulta.
@@ -104,11 +106,52 @@ class MercadoPublicoExtractor:
         cantidad_total: int = data.get("Cantidad", 0)
         listado: list[dict[str, Any]] = data.get("Listado", [])
 
-        logger.info(
-            "Fecha %s → %d OC encontradas (API reporta %d total).",
-            fecha_str, len(listado), cantidad_total,
+        if len(listado) >= cantidad_total or cantidad_total == 0:
+            logger.info(
+                "Fecha %s → %d OC encontradas.", fecha_str, len(listado),
+            )
+            return listado
+
+        # La API truncó resultados — intentar obtener más filtrando por estado
+        logger.warning(
+            "Fecha %s: API reporta %d OC pero retornó solo %d. "
+            "Reintentando con filtros por estado...",
+            fecha_str, cantidad_total, len(listado),
         )
-        return listado
+
+        seen_codes: set[str] = {oc["Codigo"] for oc in listado if "Codigo" in oc}
+        all_ocs: list[dict[str, Any]] = list(listado)
+
+        for estado_code in OC_ESTADO_LABELS:
+            params_estado: dict[str, str] = {
+                "fecha": fecha_str,
+                "ticket": self.ticket,
+                "CodigoEstado": estado_code,
+            }
+            try:
+                data_estado = self._get_with_retry(API_BASE_URL, params_estado)
+                nuevas = [
+                    oc for oc in data_estado.get("Listado", [])
+                    if oc.get("Codigo") and oc["Codigo"] not in seen_codes
+                ]
+                for oc in nuevas:
+                    seen_codes.add(oc["Codigo"])
+                all_ocs.extend(nuevas)
+                time.sleep(REQUEST_DELAY)
+            except requests.exceptions.RequestException as exc:
+                logger.warning("Error consultando estado %s: %s", estado_code, exc)
+
+        logger.info(
+            "Fecha %s → %d OC recuperadas (de %d reportadas por API).",
+            fecha_str, len(all_ocs), cantidad_total,
+        )
+        if len(all_ocs) < cantidad_total:
+            logger.warning(
+                "Datos posiblemente incompletos: %d/%d OC recuperadas.",
+                len(all_ocs), cantidad_total,
+            )
+
+        return all_ocs
 
     # ────────── Paso 2: Detalle de una OC individual ───────────── #
 
@@ -167,6 +210,7 @@ class MercadoPublicoExtractor:
 
         Con 18,000+ OC diarias, se limita a `max_oc` para no saturar la API.
         Las OC se seleccionan priorizando las más recientes.
+        La paginación por estado se aplica automáticamente si la API trunca.
 
         Args:
             fecha: Fecha de las órdenes de compra a extraer.

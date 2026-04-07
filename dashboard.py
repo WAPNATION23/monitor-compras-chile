@@ -1,136 +1,183 @@
 """
-Dashboard interactivo para "Monitor Ciudadano de Compras Públicas".
+Dashboard interactivo para "Ojo del Pueblo".
 Construido con Streamlit.
 """
 
-import sqlite3
+import re
 import pandas as pd
 import streamlit as st
 import plotly.express as px
 import plotly.graph_objects as go
+import sys
 from datetime import datetime
+
+from queries import (
+    DB_PATH,
+    load_data,
+    init_feedback_db,
+    save_feedback,
+    format_clp,
+    format_clp_full,
+    load_licitaciones,
+    get_rate_limit_usage,
+    increment_rate_limit_usage,
+)
+from chat_service import build_db_context, build_web_context, call_deepseek
+from config import OC_TIPO_TRATO_DIRECTO
 
 # ─────────────────────────────────────────────────────────────────────────
 # CONFIGURACIÓN DE PÁGINA Y ESTILOS
 # ─────────────────────────────────────────────────────────────────────────
 st.set_page_config(
-    page_title="Monitor Ciudadano | Centro de Mando",
-    page_icon="👁️‍🗨️",
+    page_title="Ojo del Pueblo",
+    page_icon="logo_ojo_pueblo.png" if __import__('os').path.exists("logo_ojo_pueblo.png") else "O",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# Inyectar CSS personalizado para look "Centro de Monitoreo" (Dark/Neon)
+# Inyectar CSS ultra-profesional (Estilo Centro de Comando / OSINT)
 st.markdown("""
 <style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap');
 
-    /* Fondo principal y tipografía */
+    /* Fondo principal y tipografía Space Grotesk */
     .stApp {
-        background-color: #0A0E17;
-        color: #C9D1D9;
-        font-family: 'Inter', sans-serif;
+        background-color: #05080E;
+        background-image: 
+            linear-gradient(rgba(14, 21, 35, 0.4) 1px, transparent 1px),
+            linear-gradient(90deg, rgba(14, 21, 35, 0.4) 1px, transparent 1px);
+        background-size: 30px 30px;
+        color: #D1D5DB;
+        font-family: 'Space Grotesk', sans-serif;
     }
     
-    /* Bloques y cards */
+    /* Panel lateral elegante cyber */
     .css-1r6slb0, .css-12oz5g7, div[data-testid="stSidebar"] {
-        background-color: #111822 !important;
+        background-color: rgba(9, 13, 20, 0.95) !important;
         border-right: 1px solid #1E293B;
+        backdrop-filter: blur(10px);
     }
-    
-    /* Títulos elegantes */
+
+    /* Títulos y Header */
     h1, h2, h3, h4 {
         color: #F8FAFC !important;
-        font-family: 'Inter', sans-serif;
+        font-family: 'Space Grotesk', sans-serif;
         font-weight: 600;
-        letter-spacing: -0.5px;
+        letter-spacing: -0.02em;
     }
     h1 {
-        border-bottom: 2px solid transparent;
-        border-image: linear-gradient(to right, #00D2FF, #3A7BD5);
-        border-image-slice: 1;
+        border-bottom: 2px solid #2563EB;
         padding-bottom: 12px;
-        margin-bottom: 24px;
+        margin-bottom: 30px;
         font-size: 2.2rem;
-        text-transform: uppercase;
-        letter-spacing: 2px;
+        text-shadow: 0px 0px 15px rgba(37, 99, 235, 0.2);
     }
     
-    /* Métricas (KPIs) - Estilo Cyberpunk Corporativo */
+    /* Metrics y KPIs */
     [data-testid="stMetricValue"] {
-        font-size: 2.5rem;
-        font-weight: 800;
-        color: #00D2FF !important;
-        font-family: 'Inter', monospace;
+        font-size: 1.5rem;
+        font-weight: 700;
+        color: #FFFFFF !important;
+        background: -webkit-linear-gradient(45deg, #60A5FA, #FFFFFF);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
     }
     [data-testid="stMetricLabel"] {
-        font-size: 0.9rem;
+        font-size: 0.75rem;
         color: #94A3B8 !important;
         text-transform: uppercase;
-        letter-spacing: 1.5px;
-        font-weight: 600;
-        margin-bottom: 5px;
+        letter-spacing: 0.05em;
     }
-    [data-testid="stMetricDelta"] {
-        font-size: 0.9rem;
-    }
-    
-    /* Botones y enlaces */
-    .btn-portal {
-        display: inline-block;
-        padding: 0.6em 1.2em;
-        color: #ffffff !important;
-        background: linear-gradient(135deg, #FF3366, #E6003E);
-        border-radius: 4px;
-        text-decoration: none;
-        font-weight: 600;
-        text-align: center;
-        width: 100%;
-        margin-top: 10px;
-        margin-bottom: 20px;
-        transition: transform 0.2s ease, box-shadow 0.2s ease;
-        text-transform: uppercase;
-        letter-spacing: 1px;
-        font-size: 0.85rem;
-    }
-    .btn-portal:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 4px 12px rgba(255, 51, 102, 0.4);
+    div[data-testid="metric-container"] {
+        background: rgba(15, 23, 42, 0.6);
+        border: 1px solid #1E293B;
+        padding: 12px 10px;
+        border-radius: 8px;
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
     }
     
-    /* Pestañas (Tabs) */
+    /* Chat input */
+    .stChatInput {
+        border-color: #334155 !important;
+    }
+    
+    /* Download buttons */
+    .stDownloadButton > button {
+        background-color: #1E293B !important;
+        color: #94A3B8 !important;
+        border: 1px solid #334155 !important;
+        font-size: 0.8rem;
+    }
+    .stDownloadButton > button:hover {
+        background-color: #334155 !important;
+        color: #F8FAFC !important;
+    }
+    
+    /* Pestañas (Tabs) - Sin scroll horizontal */
     .stTabs [data-baseweb="tab-list"] {
-        gap: 8px;
+        gap: 4px;
         background-color: transparent;
-        padding-bottom: 5px;
-        border-bottom: 1px solid #1E293B;
+        padding-bottom: 0px;
+        border-bottom: 1px solid #334155;
+        flex-wrap: wrap;
+        overflow-x: visible !important;
+    }
+    .stTabs [data-baseweb="tab-list"] button[role="tab"] {
+        flex: 1 1 auto;
+        min-width: 0;
     }
     .stTabs [data-baseweb="tab"] {
-        background-color: #111822;
-        border-radius: 6px 6px 0 0;
-        border: 1px solid #1E293B;
+        background-color: #0F172A;
+        border: 1px solid #334155;
         border-bottom: none;
-        padding: 10px 24px;
+        padding: 8px 12px;
         transition: all 0.3s ease;
         color: #94A3B8;
         font-weight: 600;
+        border-radius: 6px 6px 0 0;
+        font-size: 0.78rem;
+        text-transform: uppercase;
+        letter-spacing: 0.03em;
+        white-space: nowrap;
     }
     .stTabs [aria-selected="true"] {
-        background-color: #0A0E17;
-        color: #00D2FF !important;
-        border-top: 3px solid #00D2FF;
+        background-color: #1E293B !important;
+        color: #38BDF8 !important;
+        border-color: #38BDF8;
+        border-width: 2px 2px 0px 2px;
+    }
+    /* Ocultar flechas de scroll en tabs */
+    .stTabs [data-baseweb="tab-list"] > div[role="presentation"] {
+        display: none !important;
     }
     
-    /* Inputs y Formularios */
-    .stTextInput input, .stSelectbox div[data-baseweb="select"] {
-        background-color: #0A0E17 !important;
-        border: 1px solid #334155 !important;
-        color: #E2E8F0 !important;
-        border-radius: 6px;
+    /* Dataframe y Tablas */
+    [data-testid="stDataFrame"] {
+        border-radius: 8px;
+        border: 1px solid #1E293B;
+        overflow: hidden;
+        box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
     }
-    .stTextInput input:focus, .stSelectbox div[data-baseweb="select"]:focus-within {
-        border-color: #00D2FF !important;
-        box-shadow: 0 0 0 1px #00D2FF !important;
+    
+    /* Alertas de Protocolo */
+    .stAlert {
+        border-radius: 6px;
+        border: 1px solid #7F1D1D;
+        background: rgba(127, 29, 29, 0.1) !important;
+    }
+    
+    /* Blockquote - explainer box */
+    blockquote {
+        background: rgba(37, 99, 235, 0.1) !important;
+        border-left: 3px solid #3B82F6 !important;
+        padding: 12px 16px !important;
+        border-radius: 0 8px 8px 0;
+        color: #94A3B8 !important;
+        font-size: 0.85rem;
+        margin-bottom: 20px;
+    }
+    blockquote p {
+        margin: 0 !important;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -138,8 +185,6 @@ st.markdown("""
 # ─────────────────────────────────────────────────────────────────────────
 # CONFIGURACIONES Y CONSTANTES
 # ─────────────────────────────────────────────────────────────────────────
-DB_PATH = "auditoria_estado.db"
-
 EMOJIS_RIESGO = {
     "MUNICIPALIDAD": "🏛️",
     "FUERZAS ARMADAS/ORDEN": "🚓",
@@ -148,123 +193,77 @@ EMOJIS_RIESGO = {
     "GENERAL": "📄"
 }
 
-# Paleta Cyberpunk para gráficos
+# Paleta profesional de análisis
 COLOR_DISCRETE_MAP = {
-    "MUNICIPALIDAD": "#00f3ff",
-    "FUERZAS ARMADAS/ORDEN": "#00ff66",
-    "ALERTA FUNDACIONES/TRATO DIRECTO": "#ff003c",
-    "MOP/OBRAS": "#fcee0a",
-    "GENERAL": "#8a2be2"
+    "MUNICIPALIDAD": "#3B82F6",
+    "FUERZAS ARMADAS/ORDEN": "#10B981",
+    "ALERTA FUNDACIONES/TRATO DIRECTO": "#EF4444",
+    "MOP/OBRAS": "#F59E0B",
+    "GENERAL": "#6366F1"
 }
-
-# ─────────────────────────────────────────────────────────────────────────
-# LÓGICA DE DATOS
-# ─────────────────────────────────────────────────────────────────────────
-@st.cache_data(ttl=3600)
-def load_data():
-    try:
-        with sqlite3.connect(DB_PATH) as conn:
-            cursor = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='ordenes_items';")
-            if not cursor.fetchone():
-                return pd.DataFrame()
-            
-            query = """
-                SELECT 
-                    codigo_oc, nombre_producto, cantidad, precio_unitario, 
-                    monto_total_item, nombre_comprador, nombre_proveedor, 
-                    fecha_creacion, estado,
-                    IFNULL(tipo_oc, '') as tipo_oc,
-                    IFNULL(categoria_riesgo, 'GENERAL') as categoria_riesgo
-                FROM ordenes_items
-                WHERE precio_unitario > 0
-                  AND estado != '9'
-            """
-            df = pd.read_sql_query(query, conn)
-            if not df.empty:
-                df['fecha_creacion'] = pd.to_datetime(df['fecha_creacion'], errors='coerce')
-                df['precio_unitario'] = pd.to_numeric(df['precio_unitario'], errors='coerce')
-                df['monto_total_item'] = pd.to_numeric(df['monto_total_item'], errors='coerce')
-                df['cantidad'] = pd.to_numeric(df['cantidad'], errors='coerce')
-            return df
-    except sqlite3.Error:
-        return pd.DataFrame()
-
-def init_feedback_db():
-    with sqlite3.connect(DB_PATH) as conn:
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS feedback_comunidad (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                tipo_reporte TEXT,
-                dato_reportado TEXT,
-                comentario TEXT,
-                fecha_reporte TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-        conn.commit()
-
-def save_feedback(tipo: str, dato: str, comentario: str):
-    with sqlite3.connect(DB_PATH) as conn:
-        conn.execute(
-            "INSERT INTO feedback_comunidad (tipo_reporte, dato_reportado, comentario) VALUES (?, ?, ?)",
-            (tipo, dato, comentario)
-        )
-        conn.commit()
-
-def format_clp(value):
-    return f"${value:,.0f}".replace(",", ".")
 
 # ─────────────────────────────────────────────────────────────────────────
 # INTERFAZ: CENTRO DE MONITOREO
 # ─────────────────────────────────────────────────────────────────────────
+@st.cache_data(ttl=3600)
+def _cached_load():
+    return load_data()
+
 def main():
     init_feedback_db()
     
     # ENCABEZADO PRINCIPAL (Compacto)
-    col_t1, col_t2 = st.columns([0.8, 0.2])
+    col_t1, col_t2 = st.columns([0.1, 0.9])
     with col_t1:
-        st.title("👁️‍🗨️ CENTRO DE MANDO: Monitor de Compras Públicas")
-        st.markdown("*Sistema integral de auditoría algorítmica y forense ciudadana.*")
+        import os
+        if os.path.exists("logo_ojo_pueblo.png"):
+            st.image("logo_ojo_pueblo.png", use_container_width=True)
     with col_t2:
-        st.caption(f"🕒 Estado: **ACTIVO** | Sinc: {datetime.now().strftime('%H:%M:%S')}")
+        st.title("Ojo del Pueblo")
+        st.markdown("*Fiscalización ciudadana de compras del Estado de Chile en tiempo real.*")
+        st.caption(f"Datos de Mercado Público (API ChileCompra) | Actualizado: {datetime.now().strftime('%d/%m/%Y %H:%M')}")
 
     # CARGA DE DATOS
-    df = load_data()
+    df = _cached_load()
 
     if df.empty:
-        st.error("📡 ENLACE CAÍDO: Base de datos vacía o no inicializada.")
-        st.info("Ejecuta `python main.py` en la terminal para recargar los databanks.")
+        st.error("Base de datos vacía o no inicializada.")
+        st.info("Ejecuta `python main.py` en la terminal para recargar los datos.")
         return
 
     # ─────────────────────────────────────────────────────────────────────────
     # PANEL DE CONTROL LATERAL (FILTROS FORENSES)
     # ─────────────────────────────────────────────────────────────────────────
     with st.sidebar:
-        st.markdown("### 🔍 MOTOR DE BÚSQUEDA GLOBAL")
-        filtro_global = st.text_input("Ingrese RUT, Nombre, Empresa, o Boletín...", placeholder="Ej: 76.111.000-1")
+        st.markdown("### Búsqueda")
+        filtro_global = st.text_input("RUT, nombre, empresa o código OC", placeholder="Ej: 76.111.000-1")
         
         st.markdown("---")
-        st.markdown("### 🎛️ FILTROS TÁCTICOS")
+        st.markdown("### Filtros")
 
-        st.markdown("**Radar Geográfico / Político**")
-        radar_antofagasta = st.checkbox("🎯 Vigilar Ecosistema Antofagasta")
-        radar_region = st.text_input("📍 Filtro de Territorio (ej. Biobío):", "")
+        st.markdown("**Zona geográfica**")
+        radar_antofagasta = st.checkbox("Solo Antofagasta")
+        radar_region = st.text_input("Otra región (ej. Biobío):", "")
         
-        st.markdown("**Radar Operacional**")
+        st.markdown("**Categoría de riesgo**")
         categorias_disp = df['categoria_riesgo'].dropna().unique().tolist()
-        filtro_cat = st.multiselect("⚠️ Amenaza Identificada", options=categorias_disp, default=[])
+        filtro_cat = st.multiselect("Seleccionar", options=categorias_disp, default=[])
         
-        min_monto = float(df['monto_total_item'].min())
-        max_monto = float(df['monto_total_item'].max())
-        
-        st.markdown("**Umbral Financiero Monitoreado ($CLP)**")
-        filtro_rango_monto = st.slider(
-            "",
-            min_value=min_monto, max_value=max_monto, 
-            value=(min_monto, max_monto), format="$%d"
-        )
+        st.markdown("**Rango de fechas**")
+        fechas_validas = df['fecha_creacion'].dropna()
+        if not fechas_validas.empty:
+            fecha_min = fechas_validas.min().date()
+            fecha_max = fechas_validas.max().date()
+            filtro_fecha = st.date_input(
+                "Desde / Hasta",
+                value=(fecha_min, fecha_max),
+                min_value=fecha_min,
+                max_value=fecha_max,
+            )
+        else:
+            filtro_fecha = None
         
         st.markdown("---")
-        st.caption("Arquitectura Forense by Antigravity AI. 🕵️‍♂️")
 
     # APLICAR FILTROS
     df_filtrado = df.copy()
@@ -274,7 +273,9 @@ def main():
         df_filtrado = df_filtrado[
             df_filtrado['nombre_comprador'].str.lower().str.contains(query, na=False) |
             df_filtrado['nombre_proveedor'].str.lower().str.contains(query, na=False) |
-            df_filtrado['codigo_oc'].str.lower().str.contains(query, na=False)
+            df_filtrado['codigo_oc'].str.lower().str.contains(query, na=False) |
+            df_filtrado['rut_proveedor'].str.lower().str.contains(query, na=False) |
+            df_filtrado['rut_comprador'].str.lower().str.contains(query, na=False)
         ]
 
     if radar_antofagasta:
@@ -283,114 +284,213 @@ def main():
         df_filtrado = df_filtrado[df_filtrado['nombre_comprador'].str.lower().str.contains(radar_region.lower(), na=False)]
     if filtro_cat:
         df_filtrado = df_filtrado[df_filtrado['categoria_riesgo'].isin(filtro_cat)]
-        
-    if min_monto != max_monto:
+    
+    if filtro_fecha and isinstance(filtro_fecha, tuple) and len(filtro_fecha) == 2:
+        desde, hasta = filtro_fecha
+        ts_desde = pd.Timestamp(desde)
+        ts_hasta = pd.Timestamp(hasta) + pd.Timedelta(days=1)
+        mask_fecha = df_filtrado['fecha_creacion'].notna()
         df_filtrado = df_filtrado[
-            (df_filtrado['monto_total_item'] >= filtro_rango_monto[0]) & 
-            (df_filtrado['monto_total_item'] <= filtro_rango_monto[1])
+            ~mask_fecha | 
+            ((df_filtrado['fecha_creacion'] >= ts_desde) & 
+             (df_filtrado['fecha_creacion'] < ts_hasta))
         ]
+        
+
 
     # ─────────────────────────────────────────────────────────────────────────
     # ENRUTAMIENTO POR PESTAÑAS (Limpieza Visual)
     # ─────────────────────────────────────────────────────────────────────────
-    tab_estadisticas, tab_cruce, tab_registro, tab_medios, tab_analistas = st.tabs([
-        "📊 Panel Táctico (Análisis)", 
-        "🔍 Cruce de Datos Forenses",
-        "📋 Registro Forense (Base de Datos)", 
-        "👁️ El Ojo del Pueblo (Señales en Vivo)",
-        "🕵️‍♂️ Inteligencia y Denuncias"
+    tab_estadisticas, tab_cruce, tab_registro, tab_medios, tab_analistas, tab_ia = st.tabs([
+        "Panel General", 
+        "Cruces Forenses",
+        "Datos Crudos", 
+        "Fuentes",
+        "Denuncias",
+        "Asistente IA"
     ])
 
     # ══════════════════════════════════════════════════════════════════════════
     # PESTAÑA 1: PANEL TÁCTICO
     # ══════════════════════════════════════════════════════════════════════════
     with tab_estadisticas:
+        # Explicación clara del panel
+        st.markdown("""
+        > **Qué estás viendo:** Este panel muestra las **órdenes de compra** emitidas por organismos del Estado de Chile, 
+        > obtenidas en tiempo real desde la API de Mercado Público (ChileCompra). El "Gasto Escaneado" es la suma total 
+        > de todas las órdenes de compra cargadas en esta plataforma. Usa los filtros del panel izquierdo para explorar.
+        """)
+        
         # KPIs Superiores
-        kpi1, kpi2, kpi3, kpi4 = st.columns(4)
+        kpi1, kpi2, kpi3, kpi4, kpi5 = st.columns(5)
         
         total_gasto = df_filtrado['monto_total_item'].sum() if not df_filtrado.empty else 0
         total_oc = df_filtrado['codigo_oc'].nunique() if not df_filtrado.empty else 0
-        max_unitario = df_filtrado['precio_unitario'].max() if not df_filtrado.empty else 0
         total_proveedores = df_filtrado['nombre_proveedor'].nunique() if not df_filtrado.empty else 0
+        total_compradores = df_filtrado['nombre_comprador'].nunique() if not df_filtrado.empty else 0
+        
+        # Calcular % trato directo
+        n_trato_directo = 0
+        if not df_filtrado.empty:
+            n_trato_directo = df_filtrado[df_filtrado['tipo_oc'].isin(OC_TIPO_TRATO_DIRECTO)]['codigo_oc'].nunique()
+        pct_td = (n_trato_directo / total_oc * 100) if total_oc > 0 else 0
         
         with kpi1:
-            st.metric("Volumen Fondeado", format_clp(total_gasto), delta="Fiscalización requerida", delta_color="inverse")
+            st.metric("Gasto Escaneado", format_clp(total_gasto), help="Suma de todas las OC cargadas")
         with kpi2:
-            st.metric("Total de OC", f"{total_oc:,}", delta="-", delta_color="off")
+            st.metric("Ordenes de Compra", f"{total_oc:,}", help="Cantidad de OC únicas")
         with kpi3:
-            st.metric("Pico Precio Unitario", format_clp(max_unitario), delta="Posible Sobreprecio", delta_color="inverse")
+            st.metric("Sin Licitación", f"{pct_td:.0f}%", help=f"{n_trato_directo} OC por trato directo")
         with kpi4:
-            st.metric("Recepciones (Emps)", f"{total_proveedores:,}", delta="Proveedores Únicos", delta_color="off")
+            st.metric("Proveedores", f"{total_proveedores:,}", help="Empresas/personas que venden al Estado")
+        with kpi5:
+            st.metric("Organismos", f"{total_compradores:,}", help="Entidades del Estado que compran")
 
         st.markdown("<br>", unsafe_allow_html=True)
+        
+        # Fila 1: Top proveedores + Gasto por organismo
         col_g1, col_g2 = st.columns(2)
         
         with col_g1:
-            st.markdown("#### 🏆 Receptores Top (Concentración Capital)")
+            st.markdown("#### Quién recibe más plata del Estado")
+            st.caption("Top 10 proveedores por monto total adjudicado")
             if not df_filtrado.empty:
                 top_prov = df_filtrado.groupby('nombre_proveedor')['monto_total_item'].sum().reset_index()
                 top_prov = top_prov.nlargest(10, 'monto_total_item').sort_values('monto_total_item', ascending=True)
+                top_prov['monto_label'] = top_prov['monto_total_item'].apply(format_clp)
                 
                 fig_bar = px.bar(
                     top_prov, x='monto_total_item', y='nombre_proveedor', orientation='h',
                     labels={'monto_total_item': 'Total ($CLP)', 'nombre_proveedor': ''},
-                    text_auto='.2s', template="plotly_dark",
+                    text='monto_label', template="plotly_dark",
                     color_discrete_sequence=["#ff3366"]
                 )
                 fig_bar.update_layout(margin=dict(l=0, r=0, t=10, b=0), font=dict(family="Inter", size=11))
+                fig_bar.update_traces(textposition='outside')
                 st.plotly_chart(fig_bar, use_container_width=True)
             else:
                 st.info("Sin datos suficientes.")
 
         with col_g2:
-            st.markdown("#### 🎯 Radar de Anomalías")
+            st.markdown("#### Quién gasta más del Estado")
+            st.caption("Top 10 organismos públicos por monto de compras")
             if not df_filtrado.empty:
-                mask = (df_filtrado['cantidad'] > 0) & (df_filtrado['precio_unitario'] > 0)
-                df_scatter = df_filtrado[mask].copy()
-
-                if not df_scatter.empty:
-                    fig_scatter = px.scatter(
-                        df_scatter, x='cantidad', y='precio_unitario', 
-                        color='categoria_riesgo',
-                        hover_data=['codigo_oc', 'nombre_producto', 'nombre_comprador'],
-                        labels={'cantidad': 'Cantidad Sol.', 'precio_unitario': 'Precio Unit.'},
-                        log_x=True, log_y=True,
-                        template="plotly_dark",
-                        color_discrete_map=COLOR_DISCRETE_MAP
-                    )
-                    fig_scatter.update_layout(margin=dict(l=0, r=0, t=10, b=0), legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
-                    st.plotly_chart(fig_scatter, use_container_width=True)
-                else:
-                    st.info("Sin datos para radar.")
+                top_comp = df_filtrado.groupby('nombre_comprador')['monto_total_item'].sum().reset_index()
+                top_comp = top_comp.nlargest(10, 'monto_total_item')
+                
+                fig_pie = px.pie(
+                    top_comp, values='monto_total_item', names='nombre_comprador',
+                    template="plotly_dark", hole=0.4,
+                    color_discrete_sequence=px.colors.qualitative.Set2
+                )
+                fig_pie.update_traces(textposition='inside', textinfo='percent+label', textfont_size=10)
+                fig_pie.update_layout(margin=dict(l=0, r=0, t=10, b=0), showlegend=False, height=400)
+                st.plotly_chart(fig_pie, use_container_width=True)
             else:
                 st.info("Sin datos.")
 
-        st.markdown("#### 📈 Pulso Temporal de Transacciones (Flujo de Dinero)")
-        if not df_filtrado.empty:
-            df_time = df_filtrado.dropna(subset=['fecha_creacion']).copy()
-            if not df_time.empty:
-                gasto_diario = df_time.groupby([df_time['fecha_creacion'].dt.date, 'categoria_riesgo'])['monto_total_item'].sum().reset_index()
-                fig_line = px.line(
-                    gasto_diario, x='fecha_creacion', y='monto_total_item', color='categoria_riesgo',
-                    template="plotly_dark", markers=True,
-                    labels={'fecha_creacion': 'Fecha', 'monto_total_item': 'Total Día'},
-                    color_discrete_map=COLOR_DISCRETE_MAP
+        # Fila 2: Tipo de compra + Timeline
+        col_g3, col_g4 = st.columns(2)
+        
+        with col_g3:
+            st.markdown("#### Cómo compran")
+            st.caption("Tipo de orden: D1/C1 = Trato Directo, CM = Convenio Marco, AG = Compra Ágil, LP = Licitación")
+            if not df_filtrado.empty:
+                tipo_data = df_filtrado.groupby('tipo_oc').agg(
+                    n_oc=('codigo_oc', 'nunique'),
+                    monto=('monto_total_item', 'sum')
+                ).reset_index()
+                tipo_data['tipo_label'] = tipo_data['tipo_oc'].map({
+                    'D1': 'Trato Directo (D1)', 'C1': 'Trato Directo (C1)',
+                    'F3': 'Trato Directo (F3)', 'G1': 'Trato Directo (G1)',
+                    'FG': 'Trato Directo (FG)', 'CM': 'Convenio Marco (CM)',
+                    'SE': 'Sin Envío (SE)', 'AG': 'Compra Ágil (AG)',
+                    'MC': 'Compra Ágil (MC)', 'R1': 'Compra Ágil (R1)',
+                    'LP': 'Licitación (LP)', 'CO': 'Convenio (CO)',
+                    'RC': 'Resolución (RC)',
+                }).fillna(tipo_data['tipo_oc'])
+                tipo_data['monto_label'] = tipo_data['monto'].apply(format_clp)
+                
+                fig_tipo = px.bar(
+                    tipo_data.sort_values('monto', ascending=True),
+                    x='monto', y='tipo_label', orientation='h',
+                    text='monto_label', template="plotly_dark",
+                    labels={'monto': 'Monto Total', 'tipo_label': ''},
+                    color='monto', color_continuous_scale=['#1E293B', '#EF4444']
                 )
-                fig_line.update_layout(height=280, margin=dict(l=0, r=0, t=10, b=0))
-                st.plotly_chart(fig_line, use_container_width=True)
+                fig_tipo.update_layout(margin=dict(l=0, r=0, t=10, b=0), showlegend=False, coloraxis_showscale=False)
+                fig_tipo.update_traces(textposition='outside')
+                st.plotly_chart(fig_tipo, use_container_width=True)
             else:
-                st.info("No hay fechas válidas.")
+                st.info("Sin datos.")
+
+        with col_g4:
+            st.markdown("#### Cuándo compran")
+            st.caption("Evolución del gasto diario")
+            if not df_filtrado.empty:
+                df_time = df_filtrado.dropna(subset=['fecha_creacion']).copy()
+                if not df_time.empty:
+                    gasto_diario = df_time.groupby(df_time['fecha_creacion'].dt.date)['monto_total_item'].sum().reset_index()
+                    gasto_diario.columns = ['fecha', 'monto']
+                    fig_line = px.area(
+                        gasto_diario, x='fecha', y='monto',
+                        template="plotly_dark",
+                        labels={'fecha': 'Fecha', 'monto': 'Gasto del día ($CLP)'},
+                        color_discrete_sequence=['#3B82F6']
+                    )
+                    fig_line.update_layout(height=350, margin=dict(l=0, r=0, t=10, b=0))
+                    st.plotly_chart(fig_line, use_container_width=True)
+                else:
+                    st.info("No hay fechas válidas.")
+            else:
+                st.info("Sin datos.")
+        
+        # Fila 3: Alertas rápidas
+        st.markdown("#### Alertas destacadas")
+        if not df_filtrado.empty:
+            top5 = df_filtrado.nlargest(5, 'monto_total_item')[['codigo_oc', 'nombre_proveedor', 'nombre_comprador', 'monto_total_item', 'tipo_oc']].copy()
+            top5['monto_total_item'] = top5['monto_total_item'].apply(format_clp)
+            top5.columns = ['Código OC', 'Proveedor', 'Organismo', 'Monto', 'Tipo']
+            st.dataframe(top5, hide_index=True, use_container_width=True)
 
     # ══════════════════════════════════════════════════════════════════════════
     # PESTAÑA 2: CRUCE DE DATOS FORENSES (CrossReferencer)
     # ══════════════════════════════════════════════════════════════════════════
     with tab_cruce:
-        st.markdown("### 🔍 Motor de Inteligencia y Cruce de Datos")
-        st.caption("Detección de patrones sistemáticos de corrupción usando el motor forense local.")
+        st.markdown("### Análisis de Cruces y Riesgo")
+        st.caption("Detección de patrones sistemáticos mediante cruces de bases de datos públicas.")
         
         try:
+            import cross_referencer
+            import importlib
+            importlib.reload(cross_referencer)
             from cross_referencer import CrossReferencer
+            
             xref = CrossReferencer(DB_PATH)
+            
+            # ── Reporte Ejecutivo ──
+            reporte = xref.reporte_ejecutivo()
+            if reporte:
+                with st.expander("📊 Reporte Ejecutivo — Resumen de la Base de Datos", expanded=False):
+                    re1, re2, re3, re4 = st.columns(4)
+                    re1.metric("Total OC", f"{reporte.get('total_ordenes', 0):,}")
+                    re2.metric("Monto Total", format_clp_full(reporte.get('monto_total_clp', 0)))
+                    re3.metric("Proveedores", f"{reporte.get('total_proveedores', 0):,}")
+                    re4.metric("Compradores", f"{reporte.get('total_compradores', 0):,}")
+                    
+                    col_cat, col_tipo = st.columns(2)
+                    with col_cat:
+                        cats = reporte.get('categorias_riesgo', {})
+                        if cats:
+                            st.markdown("**Distribución por categoría de riesgo:**")
+                            for cat, n in sorted(cats.items(), key=lambda x: x[1], reverse=True):
+                                st.write(f"- {EMOJIS_RIESGO.get(cat, '📄')} {cat}: **{n}** registros")
+                    with col_tipo:
+                        tipos = reporte.get('tipos_oc', {})
+                        if tipos:
+                            st.markdown("**Tipos de orden de compra:**")
+                            for tipo, n in sorted(tipos.items(), key=lambda x: x[1], reverse=True):
+                                st.write(f"- {tipo or 'Sin tipo'}: **{n}**")
             
             c1, c2 = st.columns(2)
             
@@ -405,7 +505,14 @@ def main():
                 
                 if not df_sosp.empty:
                     df_sosp = df_sosp.head(10)
-                    df_sosp['monto_total'] = df_sosp['monto_total'].apply(format_clp)
+                    # Botón descarga del ranking
+                    csv_sosp = df_sosp.to_csv(index=False).encode('utf-8')
+                    st.download_button(
+                        "📥 Descargar ranking", csv_sosp,
+                        file_name=f"proveedores_sospechosos_{datetime.now().strftime('%Y%m%d')}.csv",
+                        mime="text/csv", key="dl_sosp"
+                    )
+                    df_sosp['monto_total'] = df_sosp['monto_total'].apply(format_clp_full)
                     st.dataframe(df_sosp, hide_index=True, use_container_width=True)
                 else:
                     st.info("Sin anomalías encontradas bajo este filtro.")
@@ -420,7 +527,7 @@ def main():
                                           df_riesgo['rut_comprador'].str.lower().str.contains(q, na=False)]
 
                 if not df_riesgo.empty:
-                    df_riesgo['monto_total'] = df_riesgo['monto_total'].apply(format_clp)
+                    df_riesgo['monto_total'] = df_riesgo['monto_total'].apply(format_clp_full)
                     st.dataframe(df_riesgo.head(10), hide_index=True, use_container_width=True)
                 else:
                     st.info("Sin datos para analizar.")
@@ -436,8 +543,8 @@ def main():
                                   df_td['rut_comprador'].str.lower().str.contains(q, na=False)]
 
                 if not df_td.empty:
-                    df_td['monto_total'] = df_td['monto_total'].apply(format_clp)
-                    df_td['monto_td'] = df_td['monto_td'].apply(format_clp)
+                    df_td['monto_total'] = df_td['monto_total'].apply(format_clp_full)
+                    df_td['monto_td'] = df_td['monto_td'].apply(format_clp_full)
                     st.dataframe(df_td.head(10)[['nombre_comprador', 'ratio_td', 'n_trato_directo', 'n_total']], hide_index=True, use_container_width=True)
                 else:
                     st.info("Sin datos bajo este filtro.")
@@ -453,7 +560,7 @@ def main():
 
                 if not df_conc.empty:
                     df_conc = df_conc.head(5)
-                    df_conc['total_adjudicado'] = df_conc['total_adjudicado'].apply(format_clp)
+                    df_conc['total_adjudicado'] = df_conc['total_adjudicado'].apply(format_clp_full)
                     st.dataframe(df_conc[['nombre_proveedor', 'total_adjudicado', 'pct_del_total']], hide_index=True, use_container_width=True)
                 else:
                     st.info("Sin datos bajo este filtro.")
@@ -472,63 +579,118 @@ def main():
                 ]
 
             if not df_servel_cruzado.empty:
-                df_servel_cruzado['inversion_electoral'] = df_servel_cruzado['inversion_electoral'].apply(format_clp)
-                df_servel_cruzado['retorno_licitaciones'] = df_servel_cruzado['retorno_licitaciones'].apply(format_clp)
+                df_servel_cruzado['inversion_electoral'] = df_servel_cruzado['inversion_electoral'].apply(format_clp_full)
+                df_servel_cruzado['retorno_licitaciones'] = df_servel_cruzado['retorno_licitaciones'].apply(format_clp_full)
                 st.dataframe(df_servel_cruzado, hide_index=True, use_container_width=True)
             else:
                 st.info("🛡️ Nivel 0 de corrupción detectado o matriz limpia bajo este filtro. (Asegúrate de haber procesado SERVEL).")
+                
+            st.markdown("---")
+            st.markdown("#### 🏗️ Malla Societaria: Beneficiarios Finales")
+            st.caption("Personas naturales detrás de empresas que ganan contratos públicos.")
+            df_malla = xref.cruce_malla_societaria()
+            
+            if filtro_global and not df_malla.empty:
+                q = filtro_global.lower()
+                df_malla = df_malla[
+                    df_malla['CABECILLA_OCULTO'].str.lower().str.contains(q, na=False) |
+                    df_malla['EMPRESA_PANTALLA'].str.lower().str.contains(q, na=False) |
+                    df_malla['RUT_CABECILLA'].str.lower().str.contains(q, na=False)
+                ]
+
+            if not df_malla.empty:
+                df_malla['MONTO_EXTRAIDO'] = df_malla['MONTO_EXTRAIDO'].apply(format_clp_full)
+                st.dataframe(df_malla, hide_index=True, use_container_width=True)
+            else:
+                st.info("No hay datos de dueños reales vinculados al Mercado Público en la base local aún.")
         
-        except ImportError as e:
-            st.error("Error: el módulo `cross_referencer.py` no está disponible o tiene errores.")
+        except Exception as e:
+            st.error(f"Error cargando cruces forenses: {e}")
 
     # ══════════════════════════════════════════════════════════════════════════
     # PESTAÑA 3: REGISTRO FORENSE RAW
     # ══════════════════════════════════════════════════════════════════════════
     with tab_registro:
-        st.markdown(f"### 📋 Base de Datos Auditada ({len(df_filtrado)} eventos)")
+        st.markdown(f"### Registro Completo ({len(df_filtrado)} registros)")
         
-        if not df_filtrado.empty:
-            mostrar_col = [
-                'codigo_oc', 'categoria_riesgo', 'nombre_comprador', 
-                'nombre_proveedor', 'nombre_producto', 'cantidad', 
-                'precio_unitario', 'monto_total_item', 'fecha_creacion'
-            ]
-            dt_display = df_filtrado[mostrar_col].copy()
-            if pd.api.types.is_datetime64_any_dtype(dt_display['fecha_creacion']):
-                dt_display['fecha_creacion'] = dt_display['fecha_creacion'].dt.strftime('%Y-%m-%d')
+        # Sub-tabs para OC y Licitaciones
+        sub_oc, sub_lic = st.tabs(["Órdenes de Compra", "Licitaciones Públicas"])
+        
+        with sub_oc:
+            if not df_filtrado.empty:
+                mostrar_col = [
+                    'codigo_oc', 'categoria_riesgo', 'nombre_comprador', 
+                    'nombre_proveedor', 'nombre_producto', 'cantidad', 
+                    'precio_unitario', 'monto_total_item', 'fecha_creacion'
+                ]
+                dt_display = df_filtrado[mostrar_col].copy()
+                if pd.api.types.is_datetime64_any_dtype(dt_display['fecha_creacion']):
+                    dt_display['fecha_creacion'] = dt_display['fecha_creacion'].dt.strftime('%Y-%m-%d')
 
-            # Renderizado elegante utilizando st.column_config
-            st.dataframe(
-                dt_display,
-                use_container_width=True,
-                height=600,
-                hide_index=True,
-                column_config={
-                    "codigo_oc": st.column_config.TextColumn("Código OC"),
-                    "categoria_riesgo": st.column_config.TextColumn("Nivel Riesgo"),
-                    "nombre_comprador": st.column_config.TextColumn("Entidad de Gobierno"),
-                    "nombre_proveedor": st.column_config.TextColumn("Proveedor / Empresa"),
-                    "nombre_producto": st.column_config.TextColumn("Ítem Adquirido", width="medium"),
-                    "cantidad": st.column_config.NumberColumn("Ud.", format="%d"),
-                    "precio_unitario": st.column_config.NumberColumn("Precio Ud.", format="$%d"),
-                    "monto_total_item": st.column_config.ProgressColumn(
-                        "Monto Fondeado ($CLP)", 
-                        format="$%f", 
-                        min_value=0, 
-                        max_value=max(dt_display['monto_total_item'].max(), 1)
-                    ),
-                    "fecha_creacion": st.column_config.DateColumn("Fecha Emisión")
-                }
-            )
-        else:
-            st.warning("No hay registros bajo las métricas del Radar Estratégico actual.")
+                # Botón de descarga
+                csv_oc = dt_display.to_csv(index=False).encode('utf-8')
+                st.download_button(
+                    "📥 Descargar datos OC (CSV)", csv_oc,
+                    file_name=f"ordenes_compra_{datetime.now().strftime('%Y%m%d')}.csv",
+                    mime="text/csv"
+                )
+
+                st.dataframe(
+                    dt_display,
+                    use_container_width=True,
+                    height=500,
+                    hide_index=True,
+                    column_config={
+                        "codigo_oc": st.column_config.TextColumn("Código OC"),
+                        "categoria_riesgo": st.column_config.TextColumn("Nivel Riesgo"),
+                        "nombre_comprador": st.column_config.TextColumn("Entidad de Gobierno"),
+                        "nombre_proveedor": st.column_config.TextColumn("Proveedor / Empresa"),
+                        "nombre_producto": st.column_config.TextColumn("Ítem Adquirido", width="medium"),
+                        "cantidad": st.column_config.NumberColumn("Ud.", format="%d"),
+                        "precio_unitario": st.column_config.NumberColumn("Precio Ud.", format="$%d"),
+                        "monto_total_item": st.column_config.ProgressColumn(
+                            "Monto ($CLP)", 
+                            format="$%f", 
+                            min_value=0, 
+                            max_value=max(dt_display['monto_total_item'].max(), 1)
+                        ),
+                        "fecha_creacion": st.column_config.DateColumn("Fecha Emisión")
+                    }
+                )
+            else:
+                st.warning("No hay registros con los filtros actuales.")
+        
+        with sub_lic:
+            try:
+                df_lic = load_licitaciones(limit=5000)
+                if not df_lic.empty:
+                    if filtro_global:
+                        q = filtro_global.lower()
+                        mask = pd.Series([False] * len(df_lic))
+                        for col in df_lic.select_dtypes(include='object').columns:
+                            mask = mask | df_lic[col].str.lower().str.contains(q, na=False)
+                        df_lic = df_lic[mask]
+
+                    st.caption(f"{len(df_lic)} licitaciones encontradas")
+
+                    csv_lic = df_lic.to_csv(index=False).encode('utf-8')
+                    st.download_button(
+                        "📥 Descargar licitaciones (CSV)", csv_lic,
+                        file_name=f"licitaciones_{datetime.now().strftime('%Y%m%d')}.csv",
+                        mime="text/csv"
+                    )
+                    st.dataframe(df_lic, use_container_width=True, height=500, hide_index=True)
+                else:
+                    st.info("No hay licitaciones cargadas aún.")
+            except Exception:
+                st.info("Tabla de licitaciones no disponible.")
 
     # ══════════════════════════════════════════════════════════════════════════
     # PESTAÑA 3: OJO DEL PUEBLO (MEDIOS Y TRANSMISIONES)
     # ══════════════════════════════════════════════════════════════════════════
     with tab_medios:
-        st.markdown("### 👁️ Enlaces a Transmisiones Web Gratuitas")
-        st.caption("Periodismo local oficial y portales gubernamentales en vivo para contrastar hallazgos.")
+        st.markdown("### Fuentes Oficiales y Medios")
+        st.caption("Acceso directo a portales gubernamentales y periodismo de investigación para contrastar hallazgos.")
         
         col_m1, col_m2, col_m3 = st.columns(3)
         
@@ -560,21 +722,21 @@ def main():
     # PESTAÑA 4: INTELIGENCIA CIVIL (REPORTES Y LOBBY)
     # ══════════════════════════════════════════════════════════════════════════
     with tab_analistas:
-        st.markdown("### 🏛️ RADAR LEGISLATIVO (Alerta de Lobby)")
-        st.warning("⚠️ Vigila leyes en curso que modifiquen normas de compras/subvenciones con nombre y apellido.")
+        st.markdown("### Radar Legislativo Oficial")
+        st.warning("Monitoreo de proyectos de ley que modifiquen normas de compras o subvenciones.")
         
         col_leg1, col_leg2, col_leg3 = st.columns(3)
         with col_leg1:
-            st.info("📉 **Ley de Compras Públicas (Modificación)**\n\nBoletín: 14137-05 | **Rápida**\n\n[Ver Senado.cl](#)")
+            st.info("📉 **Ley de Compras Públicas**\n\nRevisa el estado de proyectos de ley relacionados.\n\n[Buscar en Senado.cl](https://www.senado.cl/appsenado/templates/tramitacion/index.html)")
         with col_leg2:
-            st.error("🚨 **Subvenciones Especiales Fundaciones**\n\nBoletín: 15423-01 | **M. Mixta**\n\n[Ver Senado.cl](#)")
+            st.error("🚨 **Subvenciones y Transferencias**\n\nMonitorea cambios normativos en subvenciones públicas.\n\n[Buscar en Cámara](https://www.camara.cl/legislacion/ProyectosDeLey/proyectos_702702702702702ley.aspx)")
         with col_leg3:
-            st.warning("🚧 **Ley de Concesiones Viales MOP**\n\nBoletín: 16122-09 | **Prox. Votación**\n\n[Ver Camara.cl](#)")
+            st.warning("🚧 **Transparencia y Probidad**\n\nSigue los proyectos de ley sobre transparencia.\n\n[Buscar en BCN](https://www.bcn.cl/leychile)")
 
         st.markdown("---")
 
-        st.markdown("### 📡 TRANSMITIR INTELIGENCIA FORENSE AL BOT")
-        st.info("Alimenta a la Inteligencia Artificial con patrones orgánicos (Nepotismo o Proyectos de Ley Fantasma) para que cruce bases de datos.")
+        st.markdown("### Reportar un Hallazgo")
+        st.info("Aporta datos de posibles irregularidades para que el sistema los cruce con las bases de datos públicas.")
         
         with st.form("feedback_form", clear_on_submit=True):
             col_f1, col_f2 = st.columns(2)
@@ -595,14 +757,132 @@ def main():
                 
             f_comentario = st.text_area("Análisis Forense (Descripción del modus operandi / Impacto):", height=120)
             
-            submit_btn = st.form_submit_button("🔥 Inyectar Alerta al Sistema Central")
+            submit_btn = st.form_submit_button("� Enviar Reporte")
             
             if submit_btn:
                 if f_dato.strip() == "":
-                    st.error("❌ Abortado: Falta el código OC, RUT o Dato Clave.")
+                    st.error("❌ Debes incluir al menos un dato clave (OC, RUT o nombre).")
                 else:
                     save_feedback(f_tipo, f_dato, f_comentario)
-                    st.success(f"✅ ¡Confirmado! La inteligencia sobre '{f_dato}' ha sido indexada para escrutinio algorítmico global.")
+                    st.success(f"✅ Reporte sobre '{f_dato}' registrado correctamente.")
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # PESTAÑA 6: EL CEREBRO DEL OJO DE DIOS (CHATBOT FORENSE)
+    # ══════════════════════════════════════════════════════════════════════════
+    with tab_ia:
+        st.markdown("### Asistente de Investigación")
+        st.caption("Consulta perfiles de políticos, empresas o fundaciones. El asistente busca en la web y cruza con la base de datos.")
+        
+        if "ia_messages" not in st.session_state:
+            st.session_state.ia_messages = [
+                {"role": "assistant", "content": "Sistema listo. Puedo investigar perfiles de empresas, políticos o instituciones cruzando datos públicos. ¿Qué necesitas analizar?"}
+            ]
+
+        for message in st.session_state.ia_messages:
+            with st.chat_message(message["role"]):
+                st.markdown(message["content"])
+
+        if "api_calls" not in st.session_state:
+            st.session_state.api_calls = 0
+
+        # Rate limit por IP: 20 consultas por día
+        try:
+            headers = st.context.headers
+            user_ip = headers.get("X-Forwarded-For", headers.get("Host", "local")).split(",")[0].strip()
+        except Exception:
+            user_ip = "local"
+        
+        today_str = datetime.now().strftime("%Y-%m-%d")
+        daily_used = get_rate_limit_usage(user_ip, today_str)
+        
+        daily_limit = 20
+        remaining = max(0, daily_limit - daily_used)
+        st.caption(f"Consultas restantes hoy: {remaining}/{daily_limit}")
+
+        if prompt := st.chat_input("¿Qué quieres investigar?"):
+            if remaining <= 0:
+                st.error("🛑 Límite diario alcanzado (20 consultas por día). Vuelve mañana.")
+            else:
+                st.session_state.api_calls += 1
+                increment_rate_limit_usage(user_ip, today_str)
+                st.chat_message("user").markdown(prompt)
+                st.session_state.ia_messages.append({"role": "user", "content": prompt})
+    
+                with st.chat_message("assistant"):
+                    with st.spinner("Procesando consulta..."):
+                        import os
+                        
+                        api_key = os.getenv("DEEPSEEK_API_KEY", "")
+                        if not api_key:
+                            revelacion = "Error: No se encontró DEEPSEEK_API_KEY en el archivo .env. Configura tu clave para activar el asistente."
+                            st.error(revelacion)
+                        else:
+                            # 0. Inteligencia local (DB + API)
+                            st.toast("Escaneando base de datos local...", icon="🔍")
+                            db_context = build_db_context(prompt)
+
+                            # 1. Búsqueda web
+                            st.toast("Buscando información actualizada en la web...", icon="🌐")
+                            web_context = build_web_context(prompt)
+
+                            # 2. Llamar a DeepSeek
+                            revelacion = call_deepseek(
+                                st.session_state.ia_messages, web_context, db_context
+                            )
+                        
+                        # Interceptar comando de infiltración
+                        infil_match = re.search(r"\[EJECUTAR_INFILTRACION:\s*([\d\.\-Kk]+)\]", revelacion)
+                        
+                        st.markdown(revelacion.replace(infil_match.group(0) if infil_match else "", ""))
+                
+                st.session_state.ia_messages.append({"role": "assistant", "content": revelacion})
+                
+                if infil_match:
+                    rut_detectado = infil_match.group(1)
+                    st.warning(f"� DESCARGA AUTOMÁTICA DE HISTORIAL PARA RUT: {rut_detectado}")
+                    with st.spinner("Consultando registros públicos de Mercado Público vía API..."):
+                        import subprocess
+                        target_rut = rut_detectado.replace(".", "").strip()
+                        # Validar formato RUT estricto: 7-8 dígitos, guión, dígito verificador
+                        if re.fullmatch(r"\d{7,8}-[\dkK]", target_rut):
+                            subprocess.run([sys.executable, "infiltrador_ia.py", target_rut], check=False)
+                            st.success("✅ Descarga histórica exitosa en la DB local. Presiona F5 para cargar los radares.")
+                            st.session_state.ia_messages.append({
+                                "role": "system", 
+                                "content": f"SISTEMA: La infiltración para {rut_detectado} ha inyectado con éxito su historial a la base de datos SQL. Ahora el tablero de estadísticas detectará esta información."
+                            })
+                            st.rerun()
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # COMPARTIR EN REDES SOCIALES
+    # ─────────────────────────────────────────────────────────────────────────
+    st.markdown("---")
+    st.markdown("### Compartir hallazgos")
+    
+    share_text = f"Encontré datos interesantes en Ojo del Pueblo: {total_oc:,} órdenes de compra por {format_clp(total_gasto)} bajo fiscalización ciudadana."
+    import urllib.parse
+    encoded_text = urllib.parse.quote(share_text)
+    
+    col_share1, col_share2, col_share3 = st.columns(3)
+    with col_share1:
+        st.markdown(f"[X / Twitter](https://twitter.com/intent/tweet?text={encoded_text})", unsafe_allow_html=True)
+    with col_share2:
+        st.markdown(f"[WhatsApp](https://wa.me/?text={encoded_text})", unsafe_allow_html=True)
+    with col_share3:
+        st.markdown(f"[Facebook](https://www.facebook.com/sharer/sharer.php?quote={encoded_text})", unsafe_allow_html=True)
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # DISCLAIMER LEGAL Y FOOTER (Protección Anti-Demandas)
+    # ─────────────────────────────────────────────────────────────────────────
+    st.markdown("---")
+    st.markdown("""
+    <div style="font-size: 0.8rem; color: #6B7280; text-align: justify; border: 1px solid #374151; padding: 15px; border-radius: 5px; background-color: #111827;">
+    <strong>ESTATUTO LEGAL Y DESCARGO DE RESPONSABILIDAD</strong><br>
+    <em>Ojo del Pueblo</em> es una herramienta algorítmica de análisis de datos abiertos y transparencia cívica. Las alertas rojas, anomalías y cruces societarios presentados en este panel son el resultado de <strong>análisis matemáticos automatizados y algoritmos estadísticos</strong> desarrollados sobre bases de datos públicas gubernamentales (Mercado Público, SERVEL, InfoLobby). 
+    <br><br>
+    La presencia de alertas de concentración de capital, horas inusuales o tratos directos <strong>NO constituyen una imputación ni una acusación formal de delitos</strong> (tales como fraude al fisco, colusión o cohecho). Todo análisis mostrado aquí persigue fines investigativos, educativos y de control ciudadano. Prevalece la <strong>presunción de inocencia</strong> de cualquier empresa, fundación o persona natural expuesta. Si usted observa un dato potencialmente difamatorio o erróneo en la API original del Estado, informe en la pestaña 'Inteligencia y Denuncias'.
+    </div>
+    """, unsafe_allow_html=True)
 
 if __name__ == "__main__":
     main()

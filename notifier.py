@@ -223,6 +223,93 @@ class TelegramNotifier:
 
         return result
 
+    # ═══════════════ ALERTA: TRATO DIRECTO MASIVO ═══════════════ #
+
+    def enviar_alerta_trato_directo(
+        self,
+        comprador: str,
+        proveedor: str,
+        monto_pagado: float,
+        producto_o_servicio: str,
+        link_orden: str,
+    ) -> dict[str, Any] | None:
+        """Envía una alerta cuando se detecta un Trato Directo por montos exorbitantes."""
+        codigo_oc = link_orden if not link_orden.startswith("http") else link_orden.split("=")[-1]
+        if not self._can_send_alert("TD_" + codigo_oc):
+            return None
+
+        if not link_orden.startswith("http"):
+            link_orden = f"{MERCADO_PUBLICO_OC_URL}{link_orden}"
+
+        esc = self._escape_html
+        fmt = self._fmt_clp
+
+        message: str = (
+            f"🚨💰 <b>ALERTA DE TRATO DIRECTO EXTREMO</b> 🚨💰\n"
+            f"\n"
+            f"🏢 <b>Institución:</b> {esc(comprador)}\n"
+            f"🤝 <b>Beneficiario:</b> <code>{esc(proveedor)}</code>\n"
+            f"📦 <b>Motivo/Objeto:</b> {esc(producto_o_servicio)}\n"
+            f"\n"
+            f"💵 <b>Monto Adjudicado a dedo:</b> <b>{esc(fmt(monto_pagado))} CLP</b>\n"
+            f"\n"
+            f"⚠️ <i>Monto supera el umbral crítico para saltarse licitación.</i>\n"
+            f"\n"
+            f'🔗 <a href="{esc(link_orden)}">Auditar orden en Mercado Público</a>\n'
+            f"\n"
+            f"─────────────────────────\n"
+            f"<i>🇨🇱 Monitor Ciudadano de Compras Públicas</i>"
+        )
+
+        result = self._send_message(message, parse_mode="HTML")
+        self._alerts_sent += 1
+        self._oc_codes_sent.add("TD_" + codigo_oc)
+        return result
+
+    # ═══════════════ ALERTA: CORRUPCIÓN POLÍTICA (SERVEL) ═══════════════ #
+
+    def enviar_alerta_servel(
+        self,
+        proveedor: str,
+        politico_partido: str,
+        inversion_electoral: float,
+        monto_adjudicado: float,
+        organismo_comprador: str,
+    ) -> dict[str, Any] | None:
+        """Alerta de hallazgo de correlación entre donante electoral y ganador de Trato Estatal."""
+        
+        # Como estas alertas son raras, no queremos filtrarlas fácilmente, pero si proteger el spam.
+        codigo_unico = f"SRV_{proveedor[:5]}_{monto_adjudicado}"
+        if not self._can_send_alert(codigo_unico):
+            return None
+
+        esc = self._escape_html
+        fmt = self._fmt_clp
+
+        message: str = (
+            f"🏛️🕵️‍♂️ <b>¡ALERTA DE POSIBLE RED POLÍTICA-COMERCIAL!</b> 🕵️‍♂️🏛️\n"
+            f"\n"
+            f"Se ha detectado una empresa que inyectó capital al sistema político "
+            f"y acaba de recuperar su dinero vía contratos públicos.\n"
+            f"\n"
+            f"🏢 <b>Empresa / Donante:</b> <code>{esc(proveedor)}</code>\n"
+            f"🗳️ <b>Político o Partido Fondeado:</b> {esc(politico_partido)}\n"
+            f"💸 <b>Donación Electoral (SERVEL):</b> {esc(fmt(inversion_electoral))} CLP\n"
+            f"\n"
+            f"🏦 <b>Organismo que le pagó:</b> {esc(organismo_comprador)}\n"
+            f"💰 <b>Retorno vía Adjudicaciones:</b> <b>{esc(fmt(monto_adjudicado))} CLP</b>\n"
+            f"\n"
+            f"⚠️ <i>Evidencia de devolución de favores políticos detectada algorítmicamente.</i>\n"
+            f"\n"
+            f"─────────────────────────\n"
+            f"<i>🇨🇱 Monitor Ciudadano de Compras Públicas</i>"
+        )
+
+        result = self._send_message(message, parse_mode="HTML")
+        self._alerts_sent += 1
+        self._oc_codes_sent.add(codigo_unico)
+        return result
+
     # ═══════════════ Resumen diario ═══════════════ #
 
     def enviar_resumen_diario(

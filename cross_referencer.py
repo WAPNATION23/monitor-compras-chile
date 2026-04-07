@@ -123,9 +123,19 @@ class CrossReferencer:
 
         agg = df.groupby(["rut_comprador", "nombre_comprador"]).agg(
             n_total=("codigo_oc", "nunique"),
-            n_trato_directo=("es_trato_directo", "sum"),
             monto_total=("monto_total_item", "sum"),
         ).reset_index()
+
+        # Contar OC únicas (no ítems) que son trato directo
+        td_oc_counts = (
+            df[df["es_trato_directo"]]
+            .groupby(["rut_comprador", "nombre_comprador"])["codigo_oc"]
+            .nunique()
+            .reset_index()
+            .rename(columns={"codigo_oc": "n_trato_directo"})
+        )
+        agg = agg.merge(td_oc_counts, on=["rut_comprador", "nombre_comprador"], how="left")
+        agg["n_trato_directo"] = agg["n_trato_directo"].fillna(0).astype(int)
 
         # Calcular monto de tratos directos
         td_montos = df[df["es_trato_directo"]].groupby("rut_comprador").agg(
@@ -166,7 +176,7 @@ class CrossReferencer:
 
         agg = df.groupby(["rut_proveedor", "nombre_proveedor"]).agg(
             n_organismos=("rut_comprador", "nunique"),
-            organismos_lista=("nombre_comprador", lambda x: ", ".join(x.unique()[:5])),
+            organismos_lista=("nombre_comprador", lambda x: ", ".join(str(v) for v in x.dropna().unique()[:5])),
             n_categorias=("categoria", "nunique"),
             total_adjudicado=("monto_total_item", "sum"),
             n_ordenes=("codigo_oc", "nunique"),
@@ -215,8 +225,9 @@ class CrossReferencer:
 
             # 1. Ratio de tratos directos (30%)
             if "tipo_oc" in org_data.columns:
-                n_td = org_data["tipo_oc"].isin(OC_TIPO_TRATO_DIRECTO).sum()
-                ratio_td = n_td / len(org_data) if len(org_data) > 0 else 0
+                n_ocs = org_data["codigo_oc"].nunique()
+                n_td = org_data[org_data["tipo_oc"].isin(OC_TIPO_TRATO_DIRECTO)]["codigo_oc"].nunique()
+                ratio_td = n_td / n_ocs if n_ocs > 0 else 0
                 score += ratio_td * 30
 
             # 2. Concentración HHI (25%)
@@ -256,7 +267,8 @@ class CrossReferencer:
             })
 
         result = pd.DataFrame(scores)
-        result = result.sort_values("score_riesgo", ascending=False)
+        if not result.empty:
+            result = result.sort_values("score_riesgo", ascending=False)
 
         return result
 
@@ -318,8 +330,9 @@ class CrossReferencer:
 
             # 4. Tratos directos (15%)
             if "tipo_oc" in prov_data.columns:
-                n_td = prov_data["tipo_oc"].isin(OC_TIPO_TRATO_DIRECTO).sum()
-                ratio_td = n_td / len(prov_data)
+                n_ocs = prov_data["codigo_oc"].nunique()
+                n_td = prov_data[prov_data["tipo_oc"].isin(OC_TIPO_TRATO_DIRECTO)]["codigo_oc"].nunique()
+                ratio_td = n_td / n_ocs if n_ocs > 0 else 0
                 score += ratio_td * 15
 
             # 5. Montos redondos (10%)
@@ -339,23 +352,22 @@ class CrossReferencer:
             })
 
         result = pd.DataFrame(scores)
-        result = result.sort_values("score_sospecha", ascending=False).head(top_n)
+        if not result.empty:
+            result = result.sort_values("score_sospecha", ascending=False).head(top_n)
 
         return result
 
-    # ═══════════ CRUCE 6: SERVEL (Donaciones Electorales) ═══════════ #
+    # ══════════════════════════════════════════════════════════════════════════ #
+    # CRUCE 6: SERVEL (Donaciones Electorales vs Licitaciones)
+    # ══════════════════════════════════════════════════════════════════════════ #
 
     def cruce_servel_compras(self) -> pd.DataFrame:
         """
         Cruza los datos de aportes de campaña (SERVEL) vs. las órdenes de compra adjudicadas.
         Detecta casos donde un proveedor que donó dinero a una campaña (o partido) luego 
         ganó una licitación o trato directo.
-
-        Returns:
-            DataFrame con las alertas detectadas: Donante (Proveedor), Monto Donado, Monto Ganado.
         """
         with sqlite3.connect(self.db_path) as conn:
-            # Revisa si la tabla aportes_servel existe
             check_table = pd.read_sql_query(
                 "SELECT name FROM sqlite_master WHERE type='table' AND name='aportes_servel';",
                 conn
@@ -363,7 +375,6 @@ class CrossReferencer:
             if check_table.empty:
                 return pd.DataFrame() 
             
-            # Buscar coincidencia cruzada por rut_proveedor o nombre_aportante
             query = """
                 SELECT 
                     a.rut_aportante as rut_proveedor_aportante,
@@ -392,12 +403,57 @@ class CrossReferencer:
                 ORDER BY 
                     retorno_licitaciones DESC
             """
-            
             try:
-                df = pd.read_sql_query(query, conn)
-                return df
+                return pd.read_sql_query(query, conn)
             except Exception as e:
                 logger.error(f"Error realizando cruce SERVEL vs Compras: {e}")
+                return pd.DataFrame()
+
+    # ══════════════════════════════════════════════════════════════════════════ #
+    # CRUCE 7: MALLA SOCIETARIA (Dueños Reales Fantasmas) ⭐️ EL SANTO GRIAL
+    # ══════════════════════════════════════════════════════════════════════════ #
+
+    def cruce_malla_societaria(self) -> pd.DataFrame:
+        """
+        El 'Ojo de Dios': Cruza las compras del Mercado Público con el Registro 
+        de Empresas y Sociedades para revelar a los dueños y beneficiarios finales.
+        Si la base SERVEL está presente, también revelará si el dueño oculto 
+        financió campañas.
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            check_table = pd.read_sql_query(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='socios_empresa';",
+                conn
+            )
+            if check_table.empty:
+                return pd.DataFrame()
+                
+            query = """
+                SELECT 
+                    s.nombre_socio as CABECILLA_OCULTO,
+                    s.rut_socio as RUT_CABECILLA,
+                    s.porcentaje as PARTICIPACION_ACCIONARIA,
+                    o.nombre_proveedor as EMPRESA_PANTALLA,
+                    o.rut_proveedor as RUT_EMPRESA,
+                    o.nombre_comprador as ORGANISMO_VULNERADO,
+                    SUM(o.monto_total_item) as MONTO_EXTRAIDO,
+                    GROUP_CONCAT(DISTINCT o.codigo_oc) as ORDENES_ASOCIADAS
+                FROM 
+                    ordenes_items o
+                INNER JOIN 
+                    socios_empresa s
+                    ON REPLACE(o.rut_proveedor, '-', '') = REPLACE(s.rut_empresa, '-', '')
+                WHERE
+                    o.monto_total_item > 0
+                GROUP BY 
+                    s.rut_socio, s.nombre_socio, o.rut_proveedor, o.nombre_proveedor, o.nombre_comprador
+                ORDER BY 
+                    MONTO_EXTRAIDO DESC
+            """
+            try:
+                return pd.read_sql_query(query, conn)
+            except Exception as e:
+                logger.error(f"Error en escaneo de red societaria: {e}")
                 return pd.DataFrame()
 
     # ═══════════ Reporte Ejecutivo ═══════════ #
@@ -417,8 +473,8 @@ class CrossReferencer:
             "total_ordenes": df["codigo_oc"].nunique(),
             "total_items": len(df),
             "monto_total_clp": float(df["monto_total_item"].sum()),
-            "total_proveedores": df["rut_proveedor"].nunique(),
-            "total_compradores": df["rut_comprador"].nunique(),
+            "total_proveedores": df["nombre_proveedor"].nunique(),
+            "total_compradores": df["nombre_comprador"].nunique(),
             "precio_unitario_max": float(df["precio_unitario"].max()),
             "oc_mas_cara": df.loc[df["monto_total_item"].idxmax()].to_dict() if not df.empty else {},
             "categorias_riesgo": df["categoria_riesgo"].value_counts().to_dict() if "categoria_riesgo" in df.columns else {},

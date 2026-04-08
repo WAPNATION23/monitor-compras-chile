@@ -4,12 +4,12 @@ ServelExtractor — Motor de Inteligencia Electoral
 Módulo especializado en Extracción y Web Scraping de Aportes a Campañas.
 
 Lee datos publicados oficialmente (CSVs o tablas web de Transparencia Activa)
-del SERVEL o fuentes públicas consolidadas (datos.gob.cl u observatorios) 
-para poblar la tabla `aportes_servel` donde se registran los RUT de 
+del SERVEL o fuentes públicas consolidadas (datos.gob.cl u observatorios)
+para poblar la tabla `aportes_servel` donde se registran los RUT de
 financistas políticos.
 
 Uso forense:
-  Permitir conectar (RUT o Nombre completo de "Proveedores" de Mercado Público) 
+  Permitir conectar (RUT o Nombre completo de "Proveedores" de Mercado Público)
   con (RUT/Nombres de "Financistas de Campaña/Partido").
 """
 
@@ -19,11 +19,9 @@ import logging
 import sqlite3
 import pandas as pd
 import requests
-from bs4 import BeautifulSoup
 from pathlib import Path
-from typing import Any
 
-from config import DB_NAME, REQUEST_TIMEOUT
+from config import DB_NAME
 
 logger = logging.getLogger(__name__)
 
@@ -72,13 +70,13 @@ class ServelExtractor:
             else:
                 try:
                     df = pd.read_csv(filepath_or_url, delimiter=";", encoding="utf-8")
-                except:
+                except (UnicodeDecodeError, pd.errors.ParserError):
                     # Alternativas de codificación/Separadores
                     df = pd.read_csv(filepath_or_url, delimiter=",", encoding="latin1")
 
             # Normalización rápida a minúsculas para encontrar las columnas clave
             df.columns = df.columns.str.lower().str.strip()
-            
+
             # Mapas heurísticos de columnas típicas de las bases de SERVEL
             col_map = {
                 'rut_aportante': next((c for c in df.columns if 'rut aportante' in c or 'rut_aportante' in c or 'rut donante' in c or 'rut_don' in c), None),
@@ -108,7 +106,7 @@ class ServelExtractor:
 
             # Limpiar donaciones ilegítimas (vacías o 0)
             df_norm = df_norm[df_norm['monto_aporte'] > 0]
-            
+
             self._save_to_db(df_norm)
             return df_norm
 
@@ -120,7 +118,7 @@ class ServelExtractor:
         """Guarda los datos procesados en SQLite mitigando duplicados."""
         if df.empty:
             return
-            
+
         conn = sqlite3.connect(self.db_path)
         guardados = 0
         duplicados = 0

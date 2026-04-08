@@ -54,7 +54,7 @@ def main() -> None:
     # Si solo hay uno, dar la línea lista para copiar
     if len(chats_vistos) == 1:
         the_id = list(chats_vistos)[0]
-        print(f'📋 Copia esto en config.py:\n')
+        print('📋 Copia esto en config.py:\n')
         print(f'   TELEGRAM_CHAT_ID: str = "{the_id}"')
         print()
 

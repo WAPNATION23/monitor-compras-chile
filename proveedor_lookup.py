@@ -11,10 +11,10 @@ Endpoints utilizados:
 Uso:
     from proveedor_lookup import ProveedorLookup
     lookup = ProveedorLookup()
-    
+
     # Buscar proveedor por RUT
     info = lookup.buscar_proveedor("70.017.820-k")
-    
+
     # Listar todos los compradores (organismos públicos)
     compradores = lookup.listar_compradores()
 """
@@ -80,7 +80,7 @@ class ProveedorLookup:
                     proveedor.get("CodigoEmpresa", "?"),
                 )
                 return proveedor
-            
+
             logger.warning("Proveedor con RUT %s no encontrado.", rut)
             return None
 

@@ -97,7 +97,7 @@ class DataProcessor:
                 for idx_sql in _CREATE_INDEXES_SQL:
                     conn.execute(idx_sql)
 
-                # Migraciones: agregar columnas faltantes  
+                # Migraciones: agregar columnas faltantes
                 for col_name, col_def in _MIGRATION_COLUMNS:
                     try:
                         conn.execute(
@@ -328,7 +328,7 @@ class DataProcessor:
         try:
             with sqlite3.connect(self.db_path) as conn:
                 before_count = conn.execute("SELECT COUNT(*) FROM ordenes_items").fetchone()[0]
-                
+
                 records = [
                     (
                         row["codigo_oc"], row["nombre_producto"],
@@ -341,7 +341,7 @@ class DataProcessor:
                     )
                     for row in df.to_dict("records")
                 ]
-                
+
                 conn.executemany(
                     """
                     INSERT OR IGNORE INTO ordenes_items
@@ -354,7 +354,7 @@ class DataProcessor:
                     records,
                 )
                 conn.commit()
-                
+
                 after_count = conn.execute("SELECT COUNT(*) FROM ordenes_items").fetchone()[0]
                 inserted = after_count - before_count
 

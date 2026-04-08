@@ -20,9 +20,9 @@ def load_data() -> pd.DataFrame:
                 return pd.DataFrame()
 
             query = """
-                SELECT 
-                    codigo_oc, nombre_producto, cantidad, precio_unitario, 
-                    monto_total_item, nombre_comprador, nombre_proveedor, 
+                SELECT
+                    codigo_oc, nombre_producto, cantidad, precio_unitario,
+                    monto_total_item, nombre_comprador, nombre_proveedor,
                     rut_proveedor, rut_comprador,
                     fecha_creacion, estado,
                     IFNULL(tipo_oc, '') as tipo_oc,
@@ -76,7 +76,7 @@ def load_licitaciones(limit: int = 5000) -> pd.DataFrame:
             )
             if not cursor.fetchone():
                 return pd.DataFrame()
-            return pd.read_sql_query(f"SELECT * FROM licitaciones LIMIT {int(limit)}", conn)
+            return pd.read_sql_query("SELECT * FROM licitaciones LIMIT ?", conn, params=(int(limit),))
     except sqlite3.Error:
         return pd.DataFrame()
 

@@ -33,8 +33,9 @@ from config import (
 
 logger = logging.getLogger(__name__)
 
-# Máximo de OC a descargar en detalle por ejecución (para evitar spam a la API)
-MAX_OC_PER_RUN: int = 200
+# Máximo de OC a descargar en detalle por ejecución.
+# Con ~18,000 OC diarias y 1 req/seg, 5000 ≈ ~1.4 h. Usar --max-oc para ajustar.
+MAX_OC_PER_RUN: int = 5000
 # Delay entre requests individuales al API (segundos)
 REQUEST_DELAY: float = 1.0
 
@@ -225,10 +226,10 @@ class MercadoPublicoExtractor:
         if not listado:
             return []
 
-        # Limitar la cantidad de OC a procesar
+        # Limitar la cantidad de OC a procesar (max_oc=0 → sin límite)
         codigos: list[str] = [oc["Codigo"] for oc in listado if "Codigo" in oc]
 
-        if len(codigos) > max_oc:
+        if max_oc > 0 and len(codigos) > max_oc:
             logger.info(
                 "Limitando a %d OC de %d disponibles (día %s).",
                 max_oc, len(codigos), fecha.strftime("%d/%m/%Y"),

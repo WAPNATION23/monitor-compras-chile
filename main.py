@@ -123,6 +123,18 @@ def _parse_args() -> argparse.Namespace:
         action="store_true",
         help="Usar formato de log legible en vez de JSON.",
     )
+    parser.add_argument(
+        "--max-oc",
+        type=int,
+        default=None,
+        help="Máximo de OC a descargar en detalle (default: 5000). Usar 0 para sin límite.",
+    )
+    parser.add_argument(
+        "--rango-fechas",
+        type=str,
+        default=None,
+        help="Rango de fechas ddmmaaaa-ddmmaaaa para backfill multi-día.",
+    )
     return parser.parse_args()
 
 
@@ -133,6 +145,7 @@ def run_pipeline(
     solo_analisis: bool = False,
     metodo: str = "serenata",
     notificar_telegram: bool = False,
+    max_oc: int | None = None,
 ) -> None:
     """
     Ejecuta el pipeline completo:
@@ -156,7 +169,10 @@ def run_pipeline(
         print(f"\n📥 Etapa 1: Extrayendo OC de {fecha.strftime('%d/%m/%Y')}...")
         t_extract = time.perf_counter()
         extractor = MercadoPublicoExtractor()
-        ordenes_raw = extractor.extract(fecha)
+        extract_kwargs = {}
+        if max_oc is not None:
+            extract_kwargs["max_oc"] = max_oc
+        ordenes_raw = extractor.extract(fecha, **extract_kwargs)
         logger.info(
             "Extracción completada.",
             extra={
@@ -290,23 +306,64 @@ def run_pipeline(
 
 # ──────────────────── Punto de entrada ──────────────────── #
 
+def _parse_date(s: str) -> date:
+    """Parsea una fecha en formato ddmmaaaa."""
+    dia = int(s[:2])
+    mes = int(s[2:4])
+    anio = int(s[4:])
+    return date(anio, mes, dia)
+
+
 if __name__ == "__main__":
     args: argparse.Namespace = _parse_args()
     _setup_logging(verbose=args.verbose, json_fmt=not args.no_json)
 
-    # Determinar la fecha de consulta
+    # Rango de fechas para backfill multi-día
+    if args.rango_fechas:
+        try:
+            parts = args.rango_fechas.split("-", maxsplit=1)
+            # Formato: ddmmaaaa-ddmmaaaa (el separador es '-' pero las fechas
+            # también usan 8 dígitos, así que splitear por posición)
+            raw = args.rango_fechas.replace("-", "")
+            if len(raw) != 16 or not raw.isdigit():
+                raise ValueError("formato inválido")
+            fecha_inicio = _parse_date(raw[:8])
+            fecha_fin = _parse_date(raw[8:])
+        except (ValueError, IndexError):
+            print(f"❌ Formato de rango inválido: '{args.rango_fechas}'. Use ddmmaaaa-ddmmaaaa.")
+            sys.exit(1)
+
+        current = fecha_inicio
+        while current <= fecha_fin:
+            print(f"\n{'━' * 70}")
+            print(f"  BACKFILL: {current.strftime('%d/%m/%Y')}")
+            print(f"{'━' * 70}")
+            try:
+                run_pipeline(
+                    fecha=current,
+                    solo_analisis=args.solo_analisis,
+                    metodo=args.metodo,
+                    notificar_telegram=args.telegram,
+                    max_oc=args.max_oc,
+                )
+            except KeyboardInterrupt:
+                print("\n\n🛑 Ejecución interrumpida por el usuario.")
+                sys.exit(130)
+            except Exception as exc:
+                logging.getLogger(__name__).exception(
+                    "Error en fecha %s: %s", current.strftime("%d/%m/%Y"), exc,
+                )
+            current += timedelta(days=1)
+        sys.exit(0)
+
+    # Fecha única
     if args.fecha:
         try:
-            # Parsear formato ddmmaaaa
-            dia: int = int(args.fecha[:2])
-            mes: int = int(args.fecha[2:4])
-            anio: int = int(args.fecha[4:])
-            target_date: date = date(anio, mes, dia)
-        except (ValueError, IndexError) as exc:
+            target_date: date = _parse_date(args.fecha)
+        except (ValueError, IndexError):
             print(f"❌ Formato de fecha inválido: '{args.fecha}'. Use ddmmaaaa.")
             sys.exit(1)
     else:
-        # Por defecto: ayer
         target_date = date.today() - timedelta(days=1)
 
     try:
@@ -315,6 +372,7 @@ if __name__ == "__main__":
             solo_analisis=args.solo_analisis,
             metodo=args.metodo,
             notificar_telegram=args.telegram,
+            max_oc=args.max_oc,
         )
     except KeyboardInterrupt:
         print("\n\n🛑 Ejecución interrumpida por el usuario.")

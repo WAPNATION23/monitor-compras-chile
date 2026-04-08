@@ -14,10 +14,10 @@ Cruces implementados:
 Uso:
     from cross_referencer import CrossReferencer
     xref = CrossReferencer()
-    
+
     # Top proveedores sospechosos
     ranking = xref.ranking_proveedores_sospechosos()
-    
+
     # Organismos con más tratos directos
     directos = xref.ratio_tratos_directos()
 """
@@ -30,7 +30,6 @@ from pathlib import Path
 from typing import Any
 
 import pandas as pd
-import numpy as np
 
 from config import DB_NAME, OC_TIPO_TRATO_DIRECTO
 
@@ -48,7 +47,7 @@ class CrossReferencer:
         with sqlite3.connect(self.db_path) as conn:
             df = pd.read_sql_query(
                 """
-                SELECT * FROM ordenes_items 
+                SELECT * FROM ordenes_items
                 WHERE precio_unitario > 0 AND estado != '9'
                 """,
                 conn,
@@ -62,7 +61,7 @@ class CrossReferencer:
     def concentracion_capital(self, top_n: int = 20) -> pd.DataFrame:
         """
         Analiza la concentración de gasto público en pocos proveedores.
-        
+
         Un indicador clásico de corrupción es cuando el 80% del gasto
         se concentra en el 20% de los proveedores (o peor).
 
@@ -102,7 +101,7 @@ class CrossReferencer:
     def ratio_tratos_directos(self) -> pd.DataFrame:
         """
         Calcula el ratio de Tratos Directos vs Licitaciones/CM por organismo.
-        
+
         Un ratio alto de tratos directos puede indicar:
         - Evasión sistemática de licitaciones
         - Uso abusivo de excepciones legales
@@ -157,11 +156,11 @@ class CrossReferencer:
     def proveedores_multi_organismo(self, min_organismos: int = 3) -> pd.DataFrame:
         """
         Identifica proveedores que ganan contratos en muchos organismos distintos.
-        
+
         Un proveedor que opera en 10+ organismos diferentes puede ser:
         - Legítimo (empresa grande con capacidad real)
         - Sospechoso (empresa de papel con conexiones políticas)
-        
+
         La señal de sospecha aumenta si:
         - Las categorías de productos son muy diversas
         - Los montos son altos y redondos
@@ -193,7 +192,7 @@ class CrossReferencer:
     def ranking_riesgo_organismos(self) -> pd.DataFrame:
         """
         Genera un ranking de organismos públicos según indicadores de riesgo.
-        
+
         Score basado en:
         - % de tratos directos (peso: 30%)
         - Concentración en pocos proveedores - HHI (peso: 25%)
@@ -277,7 +276,7 @@ class CrossReferencer:
     def ranking_proveedores_sospechosos(self, top_n: int = 20) -> pd.DataFrame:
         """
         Genera un ranking de proveedores más sospechosos.
-        
+
         Score basado en:
         - Dispersión de precios vs mediana del mercado (30%)
         - Cantidad de categorías distintas que vende (25%)
@@ -364,7 +363,7 @@ class CrossReferencer:
     def cruce_servel_compras(self) -> pd.DataFrame:
         """
         Cruza los datos de aportes de campaña (SERVEL) vs. las órdenes de compra adjudicadas.
-        Detecta casos donde un proveedor que donó dinero a una campaña (o partido) luego 
+        Detecta casos donde un proveedor que donó dinero a una campaña (o partido) luego
         ganó una licitación o trato directo.
         """
         with sqlite3.connect(self.db_path) as conn:
@@ -373,10 +372,10 @@ class CrossReferencer:
                 conn
             )
             if check_table.empty:
-                return pd.DataFrame() 
-            
+                return pd.DataFrame()
+
             query = """
-                SELECT 
+                SELECT
                     a.rut_aportante as rut_proveedor_aportante,
                     a.nombre_aportante,
                     a.rut_receptor as rut_politico_partido,
@@ -388,19 +387,19 @@ class CrossReferencer:
                     SUM(o.monto_total_item) as retorno_licitaciones,
                     COUNT(DISTINCT o.codigo_oc) as n_ordenes,
                     GROUP_CONCAT(DISTINCT o.tipo_oc) as tipos_de_orden
-                FROM 
+                FROM
                     aportes_servel a
-                INNER JOIN 
-                    ordenes_items o 
+                INNER JOIN
+                    ordenes_items o
                     ON (
                         REPLACE(a.rut_aportante, '-', '') = REPLACE(o.rut_proveedor, '-', '')
                         OR a.nombre_aportante = o.nombre_proveedor
                     )
-                WHERE 
+                WHERE
                     a.monto_aporte > 0 AND o.monto_total_item > 0
-                GROUP BY 
+                GROUP BY
                     a.rut_aportante, a.nombre_aportante, a.rut_receptor, a.nombre_receptor, a.monto_aporte
-                ORDER BY 
+                ORDER BY
                     retorno_licitaciones DESC
             """
             try:
@@ -415,9 +414,9 @@ class CrossReferencer:
 
     def cruce_malla_societaria(self) -> pd.DataFrame:
         """
-        El 'Ojo de Dios': Cruza las compras del Mercado Público con el Registro 
+        El 'Ojo de Dios': Cruza las compras del Mercado Público con el Registro
         de Empresas y Sociedades para revelar a los dueños y beneficiarios finales.
-        Si la base SERVEL está presente, también revelará si el dueño oculto 
+        Si la base SERVEL está presente, también revelará si el dueño oculto
         financió campañas.
         """
         with sqlite3.connect(self.db_path) as conn:
@@ -427,9 +426,9 @@ class CrossReferencer:
             )
             if check_table.empty:
                 return pd.DataFrame()
-                
+
             query = """
-                SELECT 
+                SELECT
                     s.nombre_socio as CABECILLA_OCULTO,
                     s.rut_socio as RUT_CABECILLA,
                     s.porcentaje as PARTICIPACION_ACCIONARIA,
@@ -438,16 +437,16 @@ class CrossReferencer:
                     o.nombre_comprador as ORGANISMO_VULNERADO,
                     SUM(o.monto_total_item) as MONTO_EXTRAIDO,
                     GROUP_CONCAT(DISTINCT o.codigo_oc) as ORDENES_ASOCIADAS
-                FROM 
+                FROM
                     ordenes_items o
-                INNER JOIN 
+                INNER JOIN
                     socios_empresa s
                     ON REPLACE(o.rut_proveedor, '-', '') = REPLACE(s.rut_empresa, '-', '')
                 WHERE
                     o.monto_total_item > 0
-                GROUP BY 
+                GROUP BY
                     s.rut_socio, s.nombre_socio, o.rut_proveedor, o.nombre_proveedor, o.nombre_comprador
-                ORDER BY 
+                ORDER BY
                     MONTO_EXTRAIDO DESC
             """
             try:

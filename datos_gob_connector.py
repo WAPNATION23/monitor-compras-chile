@@ -12,20 +12,19 @@ Permite:
 Uso:
     from datos_gob_connector import DatosGobConnector
     conn = DatosGobConnector()
-    
+
     # Buscar datasets sobre subvenciones
     results = conn.search_datasets("subvenciones municipales", rows=5)
-    
+
     # Descargar un recurso como DataFrame
     df = conn.download_resource("3a902cdf-8115-4365-8628-c10c9109c3a5")
-    
+
     # Consulta SQL al DataStore
     df = conn.query_datastore("SELECT * FROM \"resource_id\" LIMIT 10")
 """
 
 from __future__ import annotations
 
-import io
 import logging
 from typing import Any
 

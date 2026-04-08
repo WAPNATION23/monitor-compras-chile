@@ -17,10 +17,10 @@ Uso forense:
 Uso:
     from infolobby_connector import InfoLobbyConnector
     lobby = InfoLobbyConnector()
-    
+
     # Descargar audiencias recientes
     audiencias = lobby.descargar_audiencias()
-    
+
     # Buscar audiencias de una autoridad específica
     resultado = lobby.buscar_por_autoridad("subsecretario")
 """
@@ -28,7 +28,6 @@ Uso:
 from __future__ import annotations
 
 import logging
-from typing import Any
 
 import pandas as pd
 import requests
@@ -149,7 +148,7 @@ class InfoLobbyConnector:
         ORDER BY DESC(?fecha)
         LIMIT 500
         """
-        
+
         df = self.query_sparql(sparql)
 
         if not df.empty:

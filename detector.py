@@ -28,7 +28,6 @@ from __future__ import annotations
 import logging
 import sqlite3
 from pathlib import Path
-from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -76,11 +75,11 @@ class AnomalyDetector:
         try:
             with sqlite3.connect(self.db_path) as conn:
                 df: pd.DataFrame = pd.read_sql_query(query, conn)
-            
+
             # Formatear la fecha para facilitar análisis temporal
             if not df.empty:
                 df["fecha_creacion"] = pd.to_datetime(df["fecha_creacion"], errors="coerce")
-            
+
             logger.info("Datos cargados: %d registros.", len(df))
             return df
         except sqlite3.Error as exc:
@@ -145,18 +144,18 @@ class AnomalyDetector:
         """
         if "fecha_creacion" not in df.columns or df.empty:
             return pd.DataFrame()
-            
+
         monto_sospechoso = 10_000_000  # 10 millones CLP
-        
+
         df_valid = df.dropna(subset=["fecha_creacion"]).copy()
-        
+
         # Fines de semana (5=Sábado, 6=Domingo)
         is_weekend = df_valid["fecha_creacion"].dt.dayofweek >= 5
         # Noche/Madrugada (antes de las 8am o después de las 8pm)
         is_night = (df_valid["fecha_creacion"].dt.hour < 8) | (df_valid["fecha_creacion"].dt.hour >= 20)
-        
+
         is_vampiro = (is_weekend | is_night) & (df_valid["monto_total_item"] >= monto_sospechoso)
-        
+
         outliers = df_valid[is_vampiro].copy()
         outliers["metodo"] = "Horario Vampiro"
         outliers["motivo_alerta"] = "Compra de alto monto en horario no hábil"
@@ -174,42 +173,42 @@ class AnomalyDetector:
             return pd.DataFrame()
 
         df_sorted = df.dropna(subset=["fecha_creacion"]).sort_values("fecha_creacion")
-        
+
         df_sorted = df_sorted.set_index("fecha_creacion")
         grouper = df_sorted.groupby(["rut_comprador", "rut_proveedor"])
-        
+
         # Ventana de 7 días
         rolling_counts = grouper["codigo_oc"].rolling("7D").count()
         rolling_sums = grouper["monto_total_item"].rolling("7D").sum()
-        
+
         # Criterio: Al menos 3 compras en 7 días sumando más de 1.9M CLP (aprox 30 UTM)
         mask = (rolling_counts >= 3) & (rolling_sums > 1_900_000)
-        
+
         indices_sospechosos = mask[mask].reset_index()
-        
+
         if indices_sospechosos.empty:
             return pd.DataFrame()
-            
+
         anomalias_list = []
         for _, row in indices_sospechosos.iterrows():
             comprador, proveedor, fecha = row["rut_comprador"], row["rut_proveedor"], row["fecha_creacion"]
-            
+
             fecha_inicio = fecha - pd.Timedelta(days=7)
             subset = df_sorted[
                 (df_sorted["rut_comprador"] == comprador) &
                 (df_sorted["rut_proveedor"] == proveedor)
             ].loc[fecha_inicio:fecha]
-            
+
             anomalias_list.append(subset)
-            
+
         if not anomalias_list:
              return pd.DataFrame()
-             
+
         outliers = pd.concat(anomalias_list).drop_duplicates(subset=["codigo_oc", "nombre_producto"])
         outliers = outliers.reset_index()
         outliers["metodo"] = "Fraccionamiento"
         outliers["motivo_alerta"] = "Múltiples compras al mismo proveedor en 7 días"
-        
+
         return outliers
 
     # ──────────────────── Método Ley del Fantasma (Multigiro) ──────────────────── #
@@ -222,17 +221,17 @@ class AnomalyDetector:
         """
         if "categoria" not in df.columns or df.empty:
             return pd.DataFrame()
-            
+
         df_valid = df.dropna(subset=["categoria"]).copy()
-        
+
         cats_por_prov = df_valid.groupby(["rut_proveedor", "nombre_proveedor"])["categoria"].nunique().reset_index()
-        
+
         # Criterio empírico: Más de 4 categorías completamente distintas
         rut_sospechosos = cats_por_prov[cats_por_prov["categoria"] >= 4]["rut_proveedor"]
-        
+
         if rut_sospechosos.empty:
             return pd.DataFrame()
-            
+
         outliers = df[df["rut_proveedor"].isin(rut_sospechosos)].copy()
         outliers["metodo"] = "Ley del Fantasma (Serenata)"
         outliers["motivo_alerta"] = "Proveedor vende en rubros incompatibles (Posible Empresa de Papel)"
@@ -247,27 +246,27 @@ class AnomalyDetector:
         """
         if "monto_total_item" not in df.columns or df.empty:
             return pd.DataFrame()
-            
+
         df_valid = df.dropna(subset=["rut_proveedor", "monto_total_item"]).copy()
         df_valid = df_valid[df_valid["monto_total_item"] >= 10]
-        
+
         df_valid["primer_digito"] = df_valid["monto_total_item"].apply(lambda x: int(str(int(abs(x)))[0]))
-        
+
         outliers_list = []
-        for rut, group in df_valid.groupby("rut_proveedor"):
+        for _rut, group in df_valid.groupby("rut_proveedor"):
             if len(group) < 10:
                 continue
-                
+
             conteo = group["primer_digito"].value_counts(normalize=True)
             freq_1 = conteo.get(1, 0.0)
             freq_alta = sum([conteo.get(d, 0.0) for d in [7, 8, 9]])
-            
+
             if freq_1 < 0.10 and freq_alta > 0.40:
                 outliers_list.append(group)
-                
+
         if not outliers_list:
             return pd.DataFrame()
-            
+
         outliers = pd.concat(outliers_list).copy()
         outliers = outliers.drop(columns=["primer_digito"])
         outliers["metodo"] = "Ley de Benford (Serenata)"
@@ -284,21 +283,21 @@ class AnomalyDetector:
         """
         if "nombre_producto" not in df.columns or df.empty:
             return pd.DataFrame()
-            
+
         df_valid = df.dropna(subset=["nombre_producto", "monto_total_item"]).copy()
-        
+
         regex_humo = "ASESORÍA|ASESORIA|ESTUDIO|CONSULTORÍA|CONSULTORIA|CAPACITACIÓN|EVALUACIÓN"
         mask_humo = df_valid["nombre_producto"].str.upper().str.contains(regex_humo)
-        
+
         import numpy as np
         mask_redondo = (df_valid["monto_total_item"] >= 5_000_000) & (np.isclose(df_valid["monto_total_item"] % 1_000_000, 0, atol=0.01))
-        
+
         is_spider = mask_humo & mask_redondo
         outliers = df_valid[is_spider].copy()
-        
+
         if outliers.empty:
             return pd.DataFrame()
-            
+
         outliers["metodo"] = "Red de Araña (Serenata)"
         outliers["motivo_alerta"] = "Servicio intangible millonario con monto sospechosamente cerrado"
         return outliers
@@ -310,7 +309,7 @@ class AnomalyDetector:
         Ejecuta la detección de anomalías.
 
         Args:
-            method: 
+            method:
                 "iqr"          – Solo IQR
                 "zscore"       – Solo Z-Score
                 "estadistico"  – IQR + Z-Score
@@ -330,7 +329,7 @@ class AnomalyDetector:
         grouped = df.groupby("nombre_producto")
 
         # ── Detectores Estadísticos (por producto) ──
-        for product_name, group in grouped:
+        for _product_name, group in grouped:
             if len(group) < MIN_OBSERVATIONS:
                 continue
 
@@ -350,22 +349,22 @@ class AnomalyDetector:
             vampiro_outliers = self._detect_vampiro(df)
             if not vampiro_outliers.empty:
                 anomalies.append(vampiro_outliers)
-                
+
             # Fraccionamiento
             fracc_outliers = self._detect_fraccionamiento(df)
             if not fracc_outliers.empty:
                 anomalies.append(fracc_outliers)
-                
+
             # Ley del Fantasma
             fantasma_outliers = self._detect_fantasma(df)
             if not fantasma_outliers.empty:
                 anomalies.append(fantasma_outliers)
-                
+
             # Ley de Benford
             benford_outliers = self._detect_benford(df)
             if not benford_outliers.empty:
                 anomalies.append(benford_outliers)
-                
+
             # Red de Araña
             spider_outliers = self._detect_spider(df)
             if not spider_outliers.empty:

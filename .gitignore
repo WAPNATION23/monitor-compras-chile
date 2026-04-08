@@ -31,6 +31,12 @@ oc_dump.json
 oc_output.txt
 *.log
 
+# CSVs locales (excepto datos SERVEL de ejemplo)
 *.csv
+!servel_aportes_campañas_2024.csv
+!servel_oficial_aportes_2024.csv
+
+# Backups locales
+backups/
 
 .early.coverage

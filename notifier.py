@@ -277,7 +277,7 @@ class TelegramNotifier:
         organismo_comprador: str,
     ) -> dict[str, Any] | None:
         """Alerta de hallazgo de correlación entre donante electoral y ganador de Trato Estatal."""
-        
+
         # Como estas alertas son raras, no queremos filtrarlas fácilmente, pero si proteger el spam.
         codigo_unico = f"SRV_{proveedor[:5]}_{monto_adjudicado}"
         if not self._can_send_alert(codigo_unico):

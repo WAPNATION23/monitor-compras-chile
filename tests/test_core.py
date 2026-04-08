@@ -9,8 +9,6 @@ Ejecutar:
 from __future__ import annotations
 
 import sqlite3
-import tempfile
-from pathlib import Path
 
 import pandas as pd
 import pytest
@@ -293,7 +291,7 @@ class TestProcessor:
                 "INSERT INTO ordenes_items (codigo_oc, nombre_producto, precio_unitario, cantidad) "
                 "VALUES ('OC-1', 'ITEM', 100, 10)"
             )
-            assert False, "Old schema should reject duplicate"
+            raise AssertionError("Old schema should reject duplicate")
         except sqlite3.IntegrityError:
             pass
         conn.commit()
@@ -301,7 +299,7 @@ class TestProcessor:
 
         # DataProcessor should migrate the constraint on init
         from processor import DataProcessor
-        proc = DataProcessor(db_path=db_path)
+        DataProcessor(db_path=db_path)  # side-effect: migrates constraint
 
         # Now the same insert should succeed
         conn2 = sqlite3.connect(db_path)
@@ -719,3 +717,88 @@ class TestChatService:
             [{"role": "user", "content": "test"}], "", ""
         )
         assert result == "ok after retry"
+
+
+# ──────── Backup ──────── #
+
+class TestBackup:
+    """Tests para backup.py."""
+
+    def test_create_backup(self, tmp_path, monkeypatch):
+        # Crear una BD de prueba
+        db_file = tmp_path / "test.db"
+        conn = sqlite3.connect(db_file)
+        conn.execute("CREATE TABLE t (id INTEGER)")
+        conn.execute("INSERT INTO t VALUES (1)")
+        conn.commit()
+        conn.close()
+
+        import backup
+        monkeypatch.setattr(backup, "BACKUP_DIR", tmp_path / "backups")
+
+        result = backup.create_backup(str(db_file))
+        assert result.exists()
+        assert result.stat().st_size > 0
+
+        # Verify the backup is a valid SQLite DB with the data
+        conn2 = sqlite3.connect(result)
+        rows = conn2.execute("SELECT * FROM t").fetchall()
+        conn2.close()
+        assert rows == [(1,)]
+
+    def test_restore_backup(self, tmp_path, monkeypatch):
+        import backup
+        monkeypatch.setattr(backup, "BACKUP_DIR", tmp_path / "backups")
+
+        # Create source DB (the "backup" to restore from)
+        backup_file = tmp_path / "backup_src.db"
+        conn = sqlite3.connect(backup_file)
+        conn.execute("CREATE TABLE restored (val TEXT)")
+        conn.execute("INSERT INTO restored VALUES ('hello')")
+        conn.commit()
+        conn.close()
+
+        # Create a target DB (current state)
+        target = tmp_path / "target.db"
+        conn = sqlite3.connect(target)
+        conn.execute("CREATE TABLE old (x INTEGER)")
+        conn.commit()
+        conn.close()
+
+        backup.restore_backup(str(backup_file), str(target))
+
+        # Verify target now has the restored data
+        conn = sqlite3.connect(target)
+        rows = conn.execute("SELECT * FROM restored").fetchall()
+        conn.close()
+        assert rows == [("hello",)]
+
+    def test_list_backups_empty(self, tmp_path, monkeypatch, capsys):
+        import backup
+        monkeypatch.setattr(backup, "BACKUP_DIR", tmp_path / "no_backups")
+        result = backup.list_backups()
+        assert result == []
+
+
+# ──────── Extractor max_oc=0 ──────── #
+
+class TestExtractorCap:
+    """Verifica que max_oc=0 no limita los códigos."""
+
+    def test_max_oc_zero_no_limit(self, monkeypatch):
+        from extractor import MercadoPublicoExtractor
+
+        fake_list = [{"Codigo": f"OC-{i}"} for i in range(500)]
+
+        ext = MercadoPublicoExtractor.__new__(MercadoPublicoExtractor)
+        ext.ticket = "FAKE"
+        ext.session = None
+
+        monkeypatch.setattr(ext, "_fetch_oc_codes", lambda fecha: fake_list)
+        monkeypatch.setattr(ext, "_fetch_oc_detail", lambda c: {"Codigo": c, "Items": []})
+
+        import time
+        monkeypatch.setattr(time, "sleep", lambda x: None)
+
+        result = ext.extract(__import__("datetime").date(2024, 1, 1), max_oc=0)
+        assert len(result) == 500

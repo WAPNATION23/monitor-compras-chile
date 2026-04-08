@@ -4,7 +4,8 @@
 
 ![Beta Pública](https://img.shields.io/badge/Estado-Beta%20Pública-orange)
 ![Python](https://img.shields.io/badge/Python-3.10%2B-blue)
-![Tests](https://img.shields.io/badge/Tests-43%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/Tests-47%20passing-brightgreen)
+![CI](https://img.shields.io/github/actions/workflow/status/WAPNATION23/monitor-compras-chile/ci.yml?label=CI)
 ![Licencia](https://img.shields.io/badge/Licencia-AGPL--3.0-blue)
 
 Plataforma open source que extrae, procesa y analiza órdenes de compra del Mercado Público (ChileCompra) para detectar anomalías estadísticas en el gasto estatal. Pensada para periodistas de investigación, organizaciones de la sociedad civil y ciudadanos interesados en transparencia.
@@ -24,7 +25,7 @@ Plataforma open source que extrae, procesa y analiza órdenes de compra del Merc
 | Detector estadístico | **Estable** | Benford, Z-score, IQR, concentración, trato directo |
 | Asistente IA (DeepSeek) | **Experimental** | Chat con búsqueda web + consulta local a DB. Requiere API key |
 | Notificador Telegram | **Experimental** | Envío de alertas automáticas. Requiere bot token |
-| Cruce SERVEL (donaciones) | **Demo** | Lógica implementada, requiere datos reales de aportes electorales |
+| Cruce SERVEL (donaciones) | **Operativo** | 30 registros de aportes electorales cargados, cruce con proveedores activo |
 | Cruce malla societaria | **Demo** | Lógica implementada, requiere scraper real del Diario Oficial |
 | Scraper InfoLobby | **Demo** | Conector esqueleto, API no disponible públicamente |
 
@@ -59,8 +60,20 @@ TELEGRAM_CHAT_ID=tu_chat_id
 ### Uso
 
 ```bash
-# Extraer datos del día
+# Extraer datos del día (default: ayer, hasta 5000 OC)
 py main.py
+
+# Extraer con límite custom
+py main.py --max-oc 1000          # Máximo 1000 OC
+py main.py --max-oc 0             # Sin límite
+
+# Backfill multi-día
+py main.py --rango-fechas 01042026-07042026
+
+# Backup de la base de datos
+py backup.py                      # Crear backup
+py backup.py --list               # Ver backups
+py backup.py --restore backups/archivo.db
 
 # Lanzar dashboard
 streamlit run dashboard.py
@@ -72,12 +85,14 @@ streamlit run dashboard.py
 
 ```
 main.py              → Orquestador de extracción diaria
+extractor.py         → Cliente API Mercado Público con paginación
 processor.py         → ETL: aplana OC → SQLite con deduplicación
 detector.py          → Análisis estadístico (Benford, Z-score, IQR)
 cross_referencer.py  → Cruces forenses entre fuentes de datos
 dashboard.py         → UI Streamlit (panel, cruces, chat IA)
 config.py            → Configuración centralizada (sin secrets)
 notifier.py          → Alertas Telegram
+backup.py            → Backup/restauración de BD (SQLite backup API)
 ```
 
 ---
@@ -100,7 +115,7 @@ Estas limitaciones están documentadas como issues abiertos para mejora continua
 py -m pytest tests/test_core.py -q
 ```
 
-43 tests cubriendo: procesador (ETL, deduplicación, migración de esquema), detector (IQR, Z-score, Benford), cross_referencer (concentración, rankings, SERVEL), infiltrador IA, queries, chat service, configuración.
+47 tests cubriendo: procesador (ETL, deduplicación, migración de esquema), detector (IQR, Z-score, Benford), cross_referencer (concentración, rankings, SERVEL), infiltrador IA, queries, chat service, configuración, backup (create/restore/list), extractor (max_oc=0).
 
 ---
 
@@ -121,10 +136,10 @@ Ver [CONTRIBUTING.md](CONTRIBUTING.md) para guía de contribución.
 - [x] Migración automática de esquema SQLite para BD existentes
 - [ ] Mejorar cobertura de `rut_proveedor` en la extracción
 - [ ] Implementar scraper real del Diario Oficial (sociedades)
-- [ ] Conectar datos reales de SERVEL para cruce electoral
+- [x] Conectar datos reales de SERVEL para cruce electoral
 - [ ] Migrar storage a PostgreSQL para producción
-- [ ] CI/CD con GitHub Actions (tests + lint automático)
-- [ ] Backup automático de base de datos
+- [x] CI/CD con GitHub Actions (tests + lint automático)
+- [x] Backup y restauración de base de datos
 
 ---
 

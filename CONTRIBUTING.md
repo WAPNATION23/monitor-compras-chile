@@ -37,6 +37,25 @@ py -m pytest tests/test_core.py -q
 streamlit run dashboard.py
 ```
 
+### CLI del pipeline
+
+```bash
+py main.py                                    # Extrae OC de ayer (hasta 5000)
+py main.py --fecha 01042026                   # Fecha específica (ddmmaaaa)
+py main.py --max-oc 500                       # Limitar a 500 OC
+py main.py --max-oc 0                         # Sin límite
+py main.py --rango-fechas 01042026-07042026   # Backfill multi-día
+py main.py --metodo serenata --telegram       # Análisis forense + alertas
+```
+
+### Backup de la base de datos
+
+```bash
+py backup.py                                  # Crear backup
+py backup.py --list                           # Listar backups
+py backup.py --restore backups/archivo.db     # Restaurar
+```
+
 ## Reportar problemas
 
 Abre un issue con:

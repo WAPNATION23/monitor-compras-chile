@@ -34,7 +34,6 @@ oc_output.txt
 # CSVs locales (excepto datos SERVEL de ejemplo)
 *.csv
 !servel_aportes_campañas_2024.csv
-!servel_oficial_aportes_2024.csv
 
 # Backups locales
 backups/

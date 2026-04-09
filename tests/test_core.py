@@ -13,154 +13,7 @@ import sqlite3
 import pandas as pd
 import pytest
 
-# ──────── Fixtures ──────── #
-
-MOCK_DATA = [
-    {
-        "codigo_oc": "3401-120-SE26", "nombre_producto": "MASCARILLAS DESECHABLES 3 PLIEGUES",
-        "categoria": "Insumos médicos", "cantidad": 5000, "precio_unitario": 150,
-        "monto_total_item": 750_000, "rut_comprador": "61.602.000-0",
-        "nombre_comprador": "HOSPITAL SAN JUAN DE DIOS", "rut_proveedor": "76.123.456-7",
-        "nombre_proveedor": "IMPORTADORA MEDICAL SpA", "fecha_creacion": "2026-03-10", "estado": "6",
-        "tipo_oc": "SE", "categoria_riesgo": "GENERAL",
-    },
-    {
-        "codigo_oc": "3401-121-SE26", "nombre_producto": "MASCARILLAS DESECHABLES 3 PLIEGUES",
-        "categoria": "Insumos médicos", "cantidad": 2000, "precio_unitario": 180,
-        "monto_total_item": 360_000, "rut_comprador": "61.602.000-0",
-        "nombre_comprador": "HOSPITAL SAN JUAN DE DIOS", "rut_proveedor": "76.234.567-8",
-        "nombre_proveedor": "DISTRIBUIDORA SALUD LTDA", "fecha_creacion": "2026-03-11", "estado": "6",
-        "tipo_oc": "SE", "categoria_riesgo": "GENERAL",
-    },
-    {
-        "codigo_oc": "2205-045-SE26", "nombre_producto": "MASCARILLAS DESECHABLES 3 PLIEGUES",
-        "categoria": "Insumos médicos", "cantidad": 500, "precio_unitario": 2_800,
-        "monto_total_item": 1_400_000, "rut_comprador": "61.980.000-7",
-        "nombre_comprador": "SEREMI DE SALUD VALPARAÍSO", "rut_proveedor": "76.999.888-K",
-        "nombre_proveedor": "INVERSIONES FANTASMA SpA", "fecha_creacion": "2026-03-12", "estado": "6",
-        "tipo_oc": "SE", "categoria_riesgo": "GENERAL",
-    },
-    {
-        "codigo_oc": "2205-099-SE26", "nombre_producto": "MASCARILLAS DESECHABLES 3 PLIEGUES",
-        "categoria": "Insumos médicos", "cantidad": 300, "precio_unitario": 4_500,
-        "monto_total_item": 1_350_000, "rut_comprador": "61.980.000-7",
-        "nombre_comprador": "SEREMI DE SALUD VALPARAÍSO", "rut_proveedor": "76.999.888-K",
-        "nombre_proveedor": "INVERSIONES FANTASMA SpA", "fecha_creacion": "2026-03-14", "estado": "6",
-        "tipo_oc": "SE", "categoria_riesgo": "GENERAL",
-    },
-    {
-        "codigo_oc": "7310-200-SE26", "nombre_producto": "RESMA DE PAPEL CARTA 75G 500 HOJAS",
-        "categoria": "Útiles de oficina", "cantidad": 100, "precio_unitario": 3_200,
-        "monto_total_item": 320_000, "rut_comprador": "60.805.000-4",
-        "nombre_comprador": "MUNICIPALIDAD DE PROVIDENCIA", "rut_proveedor": "77.111.222-3",
-        "nombre_proveedor": "COMERCIAL OFFICE CENTER LTDA", "fecha_creacion": "2026-03-10", "estado": "6",
-        "tipo_oc": "SE", "categoria_riesgo": "MUNICIPALIDAD",
-    },
-    {
-        "codigo_oc": "7310-201-SE26", "nombre_producto": "RESMA DE PAPEL CARTA 75G 500 HOJAS",
-        "categoria": "Útiles de oficina", "cantidad": 200, "precio_unitario": 3_800,
-        "monto_total_item": 760_000, "rut_comprador": "69.070.700-7",
-        "nombre_comprador": "REGISTRO CIVIL", "rut_proveedor": "77.111.222-3",
-        "nombre_proveedor": "COMERCIAL OFFICE CENTER LTDA", "fecha_creacion": "2026-03-11", "estado": "6",
-        "tipo_oc": "SE", "categoria_riesgo": "GENERAL",
-    },
-    {
-        "codigo_oc": "7310-305-SE26", "nombre_producto": "RESMA DE PAPEL CARTA 75G 500 HOJAS",
-        "categoria": "Útiles de oficina", "cantidad": 50, "precio_unitario": 18_900,
-        "monto_total_item": 945_000, "rut_comprador": "61.601.000-5",
-        "nombre_comprador": "MUNICIPALIDAD DE LAS CONDES", "rut_proveedor": "76.999.888-K",
-        "nombre_proveedor": "INVERSIONES FANTASMA SpA", "fecha_creacion": "2026-03-15", "estado": "6",
-        "tipo_oc": "SE", "categoria_riesgo": "MUNICIPALIDAD",
-    },
-    {
-        "codigo_oc": "7310-210-SE26", "nombre_producto": "TÓNER HP 85A ORIGINAL",
-        "categoria": "Insumos de impresión", "cantidad": 10, "precio_unitario": 45_000,
-        "monto_total_item": 450_000, "rut_comprador": "60.805.000-4",
-        "nombre_comprador": "MUNICIPALIDAD DE PROVIDENCIA", "rut_proveedor": "77.333.444-5",
-        "nombre_proveedor": "TECNOPRINT S.A.", "fecha_creacion": "2026-03-13", "estado": "6",
-        "tipo_oc": "SE", "categoria_riesgo": "MUNICIPALIDAD",
-    },
-    {
-        "codigo_oc": "6100-050-SE26", "nombre_producto": "NOTEBOOK LENOVO THINKPAD L14 I5 16GB",
-        "categoria": "Equipos computacionales", "cantidad": 25, "precio_unitario": 689_000,
-        "monto_total_item": 17_225_000, "rut_comprador": "69.070.700-7",
-        "nombre_comprador": "REGISTRO CIVIL", "rut_proveedor": "76.555.666-1",
-        "nombre_proveedor": "SOLUCIONES TECH SpA", "fecha_creacion": "2026-03-09", "estado": "12",
-        "tipo_oc": "SE", "categoria_riesgo": "GENERAL",
-    },
-    {
-        "codigo_oc": "6100-080-SE26", "nombre_producto": "SILLA ERGONÓMICA CON APOYABRAZOS",
-        "categoria": "Mobiliario", "cantidad": 15, "precio_unitario": 189_000,
-        "monto_total_item": 2_835_000, "rut_comprador": "61.601.000-5",
-        "nombre_comprador": "MUNICIPALIDAD DE LAS CONDES", "rut_proveedor": "76.555.666-1",
-        "nombre_proveedor": "SOLUCIONES TECH SpA", "fecha_creacion": "2026-03-12", "estado": "6",
-        "tipo_oc": "SE", "categoria_riesgo": "MUNICIPALIDAD",
-    },
-    # Datos extra para alcanzar MIN_OBSERVATIONS=5 en mascarillas
-    {
-        "codigo_oc": "3401-122-SE26", "nombre_producto": "MASCARILLAS DESECHABLES 3 PLIEGUES",
-        "categoria": "Insumos médicos", "cantidad": 3000, "precio_unitario": 160,
-        "monto_total_item": 480_000, "rut_comprador": "61.601.000-5",
-        "nombre_comprador": "MUNICIPALIDAD DE LAS CONDES", "rut_proveedor": "76.123.456-7",
-        "nombre_proveedor": "IMPORTADORA MEDICAL SpA", "fecha_creacion": "2026-03-13", "estado": "6",
-        "tipo_oc": "SE", "categoria_riesgo": "MUNICIPALIDAD",
-    },
-    {
-        "codigo_oc": "3401-123-SE26", "nombre_producto": "MASCARILLAS DESECHABLES 3 PLIEGUES",
-        "categoria": "Insumos médicos", "cantidad": 1000, "precio_unitario": 170,
-        "monto_total_item": 170_000, "rut_comprador": "61.601.000-5",
-        "nombre_comprador": "MUNICIPALIDAD DE LAS CONDES", "rut_proveedor": "76.234.567-8",
-        "nombre_proveedor": "DISTRIBUIDORA SALUD LTDA", "fecha_creacion": "2026-03-14", "estado": "6",
-        "tipo_oc": "SE", "categoria_riesgo": "MUNICIPALIDAD",
-    },
-    {
-        "codigo_oc": "3401-124-SE26", "nombre_producto": "MASCARILLAS DESECHABLES 3 PLIEGUES",
-        "categoria": "Insumos médicos", "cantidad": 4000, "precio_unitario": 155,
-        "monto_total_item": 620_000, "rut_comprador": "69.070.700-7",
-        "nombre_comprador": "REGISTRO CIVIL", "rut_proveedor": "76.123.456-7",
-        "nombre_proveedor": "IMPORTADORA MEDICAL SpA", "fecha_creacion": "2026-03-15", "estado": "6",
-        "tipo_oc": "SE", "categoria_riesgo": "GENERAL",
-    },
-    {
-        "codigo_oc": "3401-125-SE26", "nombre_producto": "MASCARILLAS DESECHABLES 3 PLIEGUES",
-        "categoria": "Insumos médicos", "cantidad": 2500, "precio_unitario": 165,
-        "monto_total_item": 412_500, "rut_comprador": "60.805.000-4",
-        "nombre_comprador": "MUNICIPALIDAD DE PROVIDENCIA", "rut_proveedor": "76.234.567-8",
-        "nombre_proveedor": "DISTRIBUIDORA SALUD LTDA", "fecha_creacion": "2026-03-16", "estado": "6",
-        "tipo_oc": "SE", "categoria_riesgo": "MUNICIPALIDAD",
-    },
-    # OC extra para MUNICIPALIDAD DE LAS CONDES (necesita >= 3 OC para ranking riesgo)
-    {
-        "codigo_oc": "6100-081-SE26", "nombre_producto": "MONITOR LED 24 PULGADAS",
-        "categoria": "Equipos computacionales", "cantidad": 10, "precio_unitario": 120_000,
-        "monto_total_item": 1_200_000, "rut_comprador": "61.601.000-5",
-        "nombre_comprador": "MUNICIPALIDAD DE LAS CONDES", "rut_proveedor": "76.555.666-1",
-        "nombre_proveedor": "SOLUCIONES TECH SpA", "fecha_creacion": "2026-03-16", "estado": "6",
-        "tipo_oc": "SE", "categoria_riesgo": "MUNICIPALIDAD",
-    },
-]
-
-CREATE_TABLE_SQL = """
-CREATE TABLE IF NOT EXISTS ordenes_items (
-    id               INTEGER PRIMARY KEY AUTOINCREMENT,
-    codigo_oc        TEXT    NOT NULL,
-    nombre_producto  TEXT,
-    categoria        TEXT,
-    cantidad         REAL,
-    precio_unitario  REAL,
-    monto_total_item REAL,
-    rut_comprador    TEXT,
-    nombre_comprador TEXT,
-    rut_proveedor    TEXT,
-    nombre_proveedor TEXT,
-    fecha_creacion   TEXT,
-    estado           TEXT,
-    tipo_oc          TEXT    DEFAULT '',
-    categoria_riesgo TEXT    DEFAULT 'GENERAL',
-    fecha_ingreso    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(codigo_oc, nombre_producto, precio_unitario)
-);
-"""
+from tests.fixtures import CREATE_TABLE_SQL, MOCK_DATA
 
 
 @pytest.fixture
@@ -802,3 +655,349 @@ class TestExtractorCap:
 
         result = ext.extract(__import__("datetime").date(2024, 1, 1), max_oc=0)
         assert len(result) == 500
+
+
+# ══════════════════════════════════════════════
+# Tests: Notifier (Telegram)
+# ══════════════════════════════════════════════
+
+class TestNotifier:
+    """Tests de integración para TelegramNotifier."""
+
+    def _make_notifier(self, monkeypatch):
+        """Crea un notifier con time.sleep neutralizado."""
+        from notifier import TelegramNotifier
+        monkeypatch.setattr("time.sleep", lambda x: None)
+        return TelegramNotifier(token="FAKE_TOKEN", chat_id="12345")
+
+    def test_enviar_alerta_desfalco_html_format(self, monkeypatch):
+        notifier = self._make_notifier(monkeypatch)
+        sent_payloads = []
+
+        def mock_post(url, json=None, timeout=None):
+            sent_payloads.append(json)
+
+            class Resp:
+                status_code = 200
+
+                def raise_for_status(self):
+                    pass
+
+                def json(self_inner):
+                    return {"ok": True}
+
+            return Resp()
+
+        monkeypatch.setattr(notifier.session, "post", mock_post)
+
+        notifier.enviar_alerta_desfalco(
+            producto="MASCARILLAS 3 PLIEGUES",
+            comprador="HOSPITAL SAN JUAN",
+            precio_pagado=5000,
+            precio_promedio=150,
+            z_score=8.5,
+            link_orden="3401-120-SE26",
+            categoria_riesgo="GENERAL",
+        )
+
+        assert len(sent_payloads) == 1
+        payload = sent_payloads[0]
+        assert payload["parse_mode"] == "HTML"
+        assert "SOBREPRECIO" in payload["text"]
+        assert "MASCARILLAS" in payload["text"]
+        assert "3401-120-SE26" in payload["text"]
+
+    def test_antispam_dedup(self, monkeypatch):
+        notifier = self._make_notifier(monkeypatch)
+        call_count = {"n": 0}
+
+        def mock_post(url, json=None, timeout=None):
+            call_count["n"] += 1
+
+            class Resp:
+                status_code = 200
+
+                def raise_for_status(self):
+                    pass
+
+                def json(self_inner):
+                    return {"ok": True}
+
+            return Resp()
+
+        monkeypatch.setattr(notifier.session, "post", mock_post)
+
+        # Enviar la misma OC 3 veces
+        for _ in range(3):
+            notifier.enviar_alerta_desfalco(
+                producto="P", comprador="C", precio_pagado=100,
+                precio_promedio=10, z_score=5.0, link_orden="OC-DUP-001",
+            )
+
+        # Solo 1 debería haber sido enviada (las otras 2 son duplicados)
+        assert call_count["n"] == 1
+        assert notifier._alerts_sent == 1
+
+    def test_antispam_max_alerts(self, monkeypatch):
+        from notifier import MAX_ALERTS_PER_RUN
+        notifier = self._make_notifier(monkeypatch)
+
+        def mock_post(url, json=None, timeout=None):
+            class Resp:
+                status_code = 200
+
+                def raise_for_status(self):
+                    pass
+
+                def json(self_inner):
+                    return {"ok": True}
+
+            return Resp()
+
+        monkeypatch.setattr(notifier.session, "post", mock_post)
+
+        # Enviar más alertas que el máximo
+        results = []
+        for i in range(MAX_ALERTS_PER_RUN + 5):
+            r = notifier.enviar_alerta_desfalco(
+                producto=f"PROD-{i}", comprador="C", precio_pagado=100,
+                precio_promedio=10, z_score=5.0, link_orden=f"OC-MAX-{i:03d}",
+            )
+            results.append(r)
+
+        # Las primeras MAX_ALERTS_PER_RUN deberían tener resultado, las demás None
+        assert all(r is not None for r in results[:MAX_ALERTS_PER_RUN])
+        assert all(r is None for r in results[MAX_ALERTS_PER_RUN:])
+
+    def test_message_truncation(self, monkeypatch):
+        from notifier import MAX_MESSAGE_LENGTH
+        notifier = self._make_notifier(monkeypatch)
+        sent_texts = []
+
+        def mock_post(url, json=None, timeout=None):
+            sent_texts.append(json["text"])
+
+            class Resp:
+                status_code = 200
+
+                def raise_for_status(self):
+                    pass
+
+                def json(self_inner):
+                    return {"ok": True}
+
+            return Resp()
+
+        monkeypatch.setattr(notifier.session, "post", mock_post)
+        # Enviar mensaje gigante directamente via _send_message
+        huge_msg = "A" * (MAX_MESSAGE_LENGTH + 1000)
+        notifier._send_message(huge_msg)
+
+        assert len(sent_texts[0]) <= MAX_MESSAGE_LENGTH
+
+    def test_connection_error_raises(self, monkeypatch):
+        import requests as req
+        notifier = self._make_notifier(monkeypatch)
+
+        def raise_conn(*a, **kw):
+            raise req.exceptions.ConnectionError("no network")
+
+        monkeypatch.setattr(notifier.session, "post", raise_conn)
+
+        with pytest.raises(req.exceptions.ConnectionError):
+            notifier._send_message("test")
+
+
+# ══════════════════════════════════════════════
+# Tests: Extractor retry logic
+# ══════════════════════════════════════════════
+
+class TestExtractorRetry:
+    """Tests para la lógica de reintentos de MercadoPublicoExtractor."""
+
+    def test_get_with_retry_success_on_second_attempt(self, monkeypatch):
+        import requests as req
+        from extractor import MercadoPublicoExtractor
+
+        monkeypatch.setattr("time.sleep", lambda x: None)
+
+        ext = MercadoPublicoExtractor.__new__(MercadoPublicoExtractor)
+        ext.session = req.Session()
+
+        call_count = {"n": 0}
+
+        def mock_get(url, params=None, timeout=None):
+            call_count["n"] += 1
+            if call_count["n"] == 1:
+                raise req.exceptions.Timeout("first try timeout")
+
+            class Resp:
+                status_code = 200
+
+                def raise_for_status(self):
+                    pass
+
+                def json(self_inner):
+                    return {"Listado": []}
+
+            return Resp()
+
+        monkeypatch.setattr(ext.session, "get", mock_get)
+        result = ext._get_with_retry("http://fake", {})
+        assert result == {"Listado": []}
+        assert call_count["n"] == 2
+
+    def test_get_with_retry_exhausted(self, monkeypatch):
+        import requests as req
+        from extractor import MercadoPublicoExtractor
+
+        monkeypatch.setattr("time.sleep", lambda x: None)
+
+        ext = MercadoPublicoExtractor.__new__(MercadoPublicoExtractor)
+        ext.session = req.Session()
+
+        def always_fail(url, params=None, timeout=None):
+            raise req.exceptions.ConnectionError("always fails")
+
+        monkeypatch.setattr(ext.session, "get", always_fail)
+
+        with pytest.raises(req.exceptions.ConnectionError, match="Agotados"):
+            ext._get_with_retry("http://fake", {})
+
+
+# ══════════════════════════════════════════════
+# Tests: Processor RUT validation
+# ══════════════════════════════════════════════
+
+class TestProcessorRUT:
+    """Tests para la normalización de RUT en processor.py."""
+
+    def test_normalize_valid_rut(self):
+        from processor import DataProcessor
+        assert DataProcessor._normalize_rut("76.123.456-7") == "76123456-7"
+
+    def test_normalize_rut_with_k(self):
+        from processor import DataProcessor
+        assert DataProcessor._normalize_rut("76.999.888-k") == "76999888-K"
+
+    def test_normalize_rut_already_clean(self):
+        from processor import DataProcessor
+        assert DataProcessor._normalize_rut("76123456-7") == "76123456-7"
+
+    def test_normalize_rut_empty(self):
+        from processor import DataProcessor
+        assert DataProcessor._normalize_rut("") == ""
+
+    def test_normalize_rut_invalid_format(self):
+        from processor import DataProcessor
+        # Too short — returned as-is
+        assert DataProcessor._normalize_rut("123-4") == "123-4"
+
+    def test_normalize_rut_no_dash(self):
+        from processor import DataProcessor
+        # No dash — returned as-is
+        assert DataProcessor._normalize_rut("761234567") == "761234567"
+
+    def test_flatten_oc_normalizes_ruts(self):
+        from processor import DataProcessor
+        oc = {
+            "Codigo": "TEST-RUT-SE26",
+            "CodigoEstado": 6,
+            "FechaCreacion": "2026-03-15",
+            "Comprador": {"RutUnidad": "61.602.000-0", "NombreUnidad": "TEST"},
+            "Proveedor": {"RutProveedor": "76.999.888-k", "Nombre": "PROV"},
+            "Items": {
+                "Cantidad": 1,
+                "Listado": [
+                    {"NombreProducto": "X", "Cantidad": 1, "PrecioNeto": 100, "Categoria": "T"},
+                ],
+            },
+        }
+        rows = DataProcessor._flatten_oc(oc)
+        assert rows[0]["rut_comprador"] == "61602000-0"
+        assert rows[0]["rut_proveedor"] == "76999888-K"
+
+
+# ══════════════════════════════════════════════
+# Tests: ChatService DB error handling
+# ══════════════════════════════════════════════
+
+class TestChatServiceErrors:
+    """Tests de manejo de errores en chat_service."""
+
+    def test_build_db_context_corrupted_db(self, tmp_path, monkeypatch):
+        """Si la DB está corrupta, build_db_context retorna cadena vacía."""
+        import chat_service
+
+        bad_db = tmp_path / "bad.db"
+        bad_db.write_text("not a sqlite file")
+        monkeypatch.setattr(chat_service, "DB_PATH", str(bad_db))
+
+        result = chat_service.build_db_context("mascarillas compras")
+        assert result == ""
+
+    def test_build_db_context_missing_db(self, tmp_path, monkeypatch):
+        """Si la DB no existe, build_db_context retorna cadena vacía sin crash."""
+        import chat_service
+
+        monkeypatch.setattr(chat_service, "DB_PATH", str(tmp_path / "nonexistent.db"))
+        result = chat_service.build_db_context("mascarillas compras")
+        # SQLite creates the file on connect, but the table doesn't exist
+        assert isinstance(result, str)
+
+    def test_call_deepseek_http_error(self, monkeypatch):
+        """Non-200/429 status returns error message, not crash."""
+        monkeypatch.setenv("DEEPSEEK_API_KEY", "fake-key")
+        import chat_service
+
+        class MockResponse500:
+            status_code = 500
+
+        monkeypatch.setattr(chat_service.requests, "post", lambda *a, **kw: MockResponse500())
+        monkeypatch.setattr("time.sleep", lambda x: None)
+
+        result = chat_service.call_deepseek(
+            [{"role": "user", "content": "test"}], "", ""
+        )
+        assert "500" in result
+
+
+# ══════════════════════════════════════════════
+# Tests: Concurrent DB writes
+# ══════════════════════════════════════════════
+
+class TestConcurrentDB:
+    """Verifica que el processor maneja escrituras con datos duplicados."""
+
+    def test_duplicate_insert_ignored(self, tmp_path):
+        from processor import DataProcessor
+
+        db_path = tmp_path / "concurrent.db"
+        proc = DataProcessor(db_path=db_path)
+
+        oc = {
+            "Codigo": "DUP-001-SE26",
+            "CodigoEstado": 6,
+            "FechaCreacion": "2026-03-15",
+            "Comprador": {"RutUnidad": "61.602.000-0", "NombreUnidad": "HOSPITAL TEST"},
+            "Proveedor": {"RutProveedor": "76.111.222-3", "Nombre": "PROVEEDOR TEST"},
+            "Items": {
+                "Cantidad": 1,
+                "Listado": [
+                    {"NombreProducto": "PRODUCTO A", "Cantidad": 10, "PrecioNeto": 1000, "Categoria": "Test"},
+                ],
+            },
+        }
+
+        # Insert twice — second time should skip the duplicate
+        _, inserted1 = proc.process_and_store([oc])
+        _, inserted2 = proc.process_and_store([oc])
+
+        assert inserted1 == 1
+        assert inserted2 == 0
+
+        # Verify only 1 row in DB
+        conn = sqlite3.connect(db_path)
+        count = conn.execute("SELECT COUNT(*) FROM ordenes_items").fetchone()[0]
+        conn.close()
+        assert count == 1

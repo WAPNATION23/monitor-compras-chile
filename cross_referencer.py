@@ -216,10 +216,13 @@ class CrossReferencer:
         # Solo organismos con suficientes datos
         organismos = organismos[organismos["n_ordenes"] >= 3]
 
+        # Pre-index para evitar O(n²) al filtrar por rut en el loop
+        grouped_by_comprador = dict(list(df.groupby("rut_comprador")))
+
         scores = []
         for _, org in organismos.iterrows():
             rut = org["rut_comprador"]
-            org_data = df[df["rut_comprador"] == rut]
+            org_data = grouped_by_comprador.get(rut, pd.DataFrame())
             score = 0.0
 
             # 1. Ratio de tratos directos (30%)
@@ -301,21 +304,26 @@ class CrossReferencer:
         # Solo proveedores con suficientes datos
         proveedores = proveedores[proveedores["n_ordenes"] >= 2]
 
+        # Pre-index para evitar O(n²)
+        grouped_by_proveedor = dict(list(df.groupby("rut_proveedor")))
+        medianas_por_producto = df.groupby("nombre_producto")["precio_unitario"].agg(["median", "count"])
+
         scores = []
         for _, prov in proveedores.iterrows():
             rut = prov["rut_proveedor"]
-            prov_data = df[df["rut_proveedor"] == rut]
+            prov_data = grouped_by_proveedor.get(rut, pd.DataFrame())
             score = 0.0
 
             # 1. Dispersión de precios (30%)
             for prod, group in prov_data.groupby("nombre_producto"):
-                all_prices = df[df["nombre_producto"] == prod]["precio_unitario"]
-                if len(all_prices) >= 3 and len(group) > 0:
-                    mediana_mercado = all_prices.median()
-                    if mediana_mercado > 0:
-                        ratio = (group["precio_unitario"].mean() / mediana_mercado) - 1
-                        score += min(ratio * 10, 30)  # Cap at 30
-                        break
+                stats = medianas_por_producto.loc[prod] if prod in medianas_por_producto.index else None
+                if stats is None or stats["count"] < 3 or len(group) == 0:
+                    continue
+                mediana_mercado = stats["median"]
+                if mediana_mercado > 0:
+                    ratio = (group["precio_unitario"].mean() / mediana_mercado) - 1
+                    score += min(ratio * 10, 30)  # Cap at 30
+                    break
 
             # 2. Multigiro (25%)
             if prov["n_categorias"] >= 4:

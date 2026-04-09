@@ -12,6 +12,8 @@ from datetime import datetime
 import requests
 from dotenv import load_dotenv
 
+from config import API_OC_URL, REQUEST_TIMEOUT
+
 logger = logging.getLogger(__name__)
 
 load_dotenv()
@@ -74,11 +76,8 @@ def build_db_context(prompt: str) -> str:
                 mp_ticket = os.getenv("MERCADO_PUBLICO_TICKET", "")
                 if mp_ticket:
                     try:
-                        api_url = (
-                            f"https://api.mercadopublico.cl/servicios/v1/publico/"
-                            f"ordenesdecompra.json?codigo={top_oc}&ticket={mp_ticket}"
-                        )
-                        api_resp = requests.get(api_url, timeout=10)
+                        api_url = f"{API_OC_URL}?codigo={top_oc}&ticket={mp_ticket}"
+                        api_resp = requests.get(api_url, timeout=REQUEST_TIMEOUT)
                         if api_resp.status_code == 200:
                             listado = api_resp.json().get("Listado", [])
                             if listado:

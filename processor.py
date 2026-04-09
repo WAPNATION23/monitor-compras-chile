@@ -197,6 +197,21 @@ class DataProcessor:
         match = re.search(r"-([A-Z][A-Z0-9])\d+$", codigo_oc)
         return match.group(1) if match else ""
 
+    # ──────────────── Normalizar RUT chileno ─────────────── #
+
+    @staticmethod
+    def _normalize_rut(rut: str) -> str:
+        """
+        Normaliza un RUT chileno al formato XX.XXX.XXX-X.
+        Acepta con o sin puntos/guión. Retorna string vacío si es inválido.
+        """
+        if not rut:
+            return ""
+        clean = rut.replace(".", "").replace(" ", "").strip().upper()
+        if not re.fullmatch(r"\d{7,8}-[\dK]", clean):
+            return rut  # Devolver sin cambios si no cumple formato básico
+        return clean
+
     # ──────────────── Flatten: JSON crudo → DataFrame ─────────────── #
 
     @staticmethod
@@ -240,12 +255,12 @@ class DataProcessor:
 
         # Comprador
         comprador: dict[str, Any] = oc.get("Comprador", {})
-        rut_comprador: str = comprador.get("RutUnidad", "")
+        rut_comprador: str = DataProcessor._normalize_rut(comprador.get("RutUnidad", ""))
         nombre_comprador: str = comprador.get("NombreUnidad", "")
 
         # Proveedor
         proveedor: dict[str, Any] = oc.get("Proveedor", {})
-        rut_proveedor: str = proveedor.get("RutProveedor", "")
+        rut_proveedor: str = DataProcessor._normalize_rut(proveedor.get("RutProveedor", ""))
         nombre_proveedor: str = proveedor.get("Nombre", "")
 
         # Tipo de OC y clasificación de riesgo

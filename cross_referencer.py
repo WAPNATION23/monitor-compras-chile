@@ -412,8 +412,8 @@ class CrossReferencer:
             """
             try:
                 return pd.read_sql_query(query, conn)
-            except Exception as e:
-                logger.error(f"Error realizando cruce SERVEL vs Compras: {e}")
+            except (sqlite3.Error, pd.errors.DatabaseError) as e:
+                logger.error("Error realizando cruce SERVEL vs Compras: %s", e)
                 return pd.DataFrame()
 
     # ══════════════════════════════════════════════════════════════════════════ #
@@ -459,8 +459,8 @@ class CrossReferencer:
             """
             try:
                 return pd.read_sql_query(query, conn)
-            except Exception as e:
-                logger.error(f"Error en escaneo de red societaria: {e}")
+            except (sqlite3.Error, pd.errors.DatabaseError) as e:
+                logger.error("Error en escaneo de red societaria: %s", e)
                 return pd.DataFrame()
 
     # ═══════════ Reporte Ejecutivo ═══════════ #

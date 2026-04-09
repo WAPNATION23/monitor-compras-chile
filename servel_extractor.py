@@ -63,7 +63,7 @@ class ServelExtractor:
         Lee datos del SERVEL (Consolidados o CSV de Ley de Transparencia)
         y lo normaliza independientemente si está en formato Csv o Excel.
         """
-        logger.info(f"Procesando origen de aportes SERVEL: {filepath_or_url}")
+        logger.info("Procesando origen de aportes SERVEL: %s", filepath_or_url)
         try:
             if filepath_or_url.endswith('.xlsx') or filepath_or_url.endswith('.xls'):
                 df = pd.read_excel(filepath_or_url)
@@ -90,7 +90,7 @@ class ServelExtractor:
 
             # Validar obligatorios básicos
             if not col_map['nombre_aportante'] or not col_map['nombre_receptor'] or not col_map['monto_aporte']:
-                logger.error(f"Faltan columnas clave. Identificadas: {col_map}")
+                logger.error("Faltan columnas clave. Identificadas: %s", col_map)
                 return pd.DataFrame()
 
             # Estructurar resultado estándar
@@ -110,8 +110,8 @@ class ServelExtractor:
             self._save_to_db(df_norm)
             return df_norm
 
-        except Exception as e:
-            logger.error(f"Error parseando SERVEL aportes: {e}")
+        except (pd.errors.ParserError, ValueError, KeyError, OSError) as e:
+            logger.error("Error parseando SERVEL aportes: %s", e)
             return pd.DataFrame()
 
     def _save_to_db(self, df: pd.DataFrame) -> None:
@@ -119,35 +119,32 @@ class ServelExtractor:
         if df.empty:
             return
 
-        conn = sqlite3.connect(self.db_path)
         guardados = 0
         duplicados = 0
 
-        # Iterrows es lento pero es seguro para manejar UNIQUE constraint
-        for _, row in df.iterrows():
-            try:
-                conn.execute(
-                    """
-                    INSERT INTO aportes_servel
-                    (rut_aportante, nombre_aportante, rut_receptor, nombre_receptor, tipo_receptor, monto_aporte, fecha_aporte, eleccion_campaña)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        str(row['rut_aportante']).strip().upper() if pd.notna(row['rut_aportante']) else '?',
-                        str(row['nombre_aportante']).strip().upper() if pd.notna(row['nombre_aportante']) else '?',
-                        str(row['rut_receptor']).strip().upper() if pd.notna(row['rut_receptor']) else '?',
-                        str(row['nombre_receptor']).strip().upper() if pd.notna(row['nombre_receptor']) else '?',
-                        str(row['tipo_receptor']).strip().upper() if pd.notna(row['tipo_receptor']) else 'NO DEFINIDO',
-                        float(row['monto_aporte']),
-                        str(row['fecha_aporte']) if pd.notna(row['fecha_aporte']) else None,
-                        str(row['eleccion_campaña']).strip().upper() if pd.notna(row['eleccion_campaña']) else 'GENERAL'
+        with sqlite3.connect(self.db_path) as conn:
+            # Iterrows es lento pero es seguro para manejar UNIQUE constraint
+            for _, row in df.iterrows():
+                try:
+                    conn.execute(
+                        """
+                        INSERT INTO aportes_servel
+                        (rut_aportante, nombre_aportante, rut_receptor, nombre_receptor, tipo_receptor, monto_aporte, fecha_aporte, eleccion_campaña)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            str(row['rut_aportante']).strip().upper() if pd.notna(row['rut_aportante']) else '?',
+                            str(row['nombre_aportante']).strip().upper() if pd.notna(row['nombre_aportante']) else '?',
+                            str(row['rut_receptor']).strip().upper() if pd.notna(row['rut_receptor']) else '?',
+                            str(row['nombre_receptor']).strip().upper() if pd.notna(row['nombre_receptor']) else '?',
+                            str(row['tipo_receptor']).strip().upper() if pd.notna(row['tipo_receptor']) else 'NO DEFINIDO',
+                            float(row['monto_aporte']),
+                            str(row['fecha_aporte']) if pd.notna(row['fecha_aporte']) else None,
+                            str(row['eleccion_campaña']).strip().upper() if pd.notna(row['eleccion_campaña']) else 'GENERAL'
+                        )
                     )
-                )
-                guardados += 1
-            except sqlite3.IntegrityError:
-                duplicados += 1
-                pass
-
-        conn.commit()
-        conn.close()
-        logger.info(f"Migrados a la DB Elector: {guardados} nuevos, {duplicados} repetidos.")
+                    guardados += 1
+                except sqlite3.IntegrityError:
+                    duplicados += 1
+            conn.commit()
+        logger.info("Migrados a la DB Elector: %d nuevos, %d repetidos.", guardados, duplicados)

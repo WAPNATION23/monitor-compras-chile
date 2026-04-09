@@ -79,7 +79,7 @@ class AgenteInteligencia:
 
             return resultado
 
-        except Exception as e:
+        except (OSError, fitz.FileDataError, sqlite3.Error) as e:
             return {"error": str(e)}
 
 if __name__ == "__main__":

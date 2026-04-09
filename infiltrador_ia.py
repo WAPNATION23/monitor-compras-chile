@@ -1,5 +1,9 @@
 import argparse
 import logging
+import sqlite3
+
+import requests
+
 from extractor import MercadoPublicoExtractor
 from processor import DataProcessor
 from config import API_BASE_URL, API_TICKET
@@ -8,7 +12,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 def infiltrar_rut(rut_proveedor: str):
-    logger.info(f"🦸‍♂️ [OPERACION INFILTRACION] Solicitada por I.A para RUT: {rut_proveedor}")
+    logger.info("🦸‍♂️ [OPERACION INFILTRACION] Solicitada por I.A para RUT: %s", rut_proveedor)
 
     extractor = MercadoPublicoExtractor()
     processor = DataProcessor()
@@ -28,7 +32,7 @@ def infiltrar_rut(rut_proveedor: str):
             logger.info("❌ No se encontraron contratos bajo este RUT en los registros accesibles via API rutProveedor.")
             return 0
 
-        logger.info(f"✅ Se encontraron {len(listado)} Ordenes de Compra asociadas al RUT. Descargando detalle...")
+        logger.info("✅ Se encontraron %d Ordenes de Compra asociadas al RUT. Descargando detalle...", len(listado))
 
         # 2. Descargar detalle e inyectar
         detalles = []
@@ -38,14 +42,14 @@ def infiltrar_rut(rut_proveedor: str):
                 if det:
                     detalles.append(det)
 
-        logger.info(f"💾 Inyectando {len(detalles)} expedientes a la base de datos local...")
+        logger.info("💾 Inyectando %d expedientes a la base de datos local...", len(detalles))
         df, inserted = processor.process_and_store(detalles)
-        logger.info(f"✓ {inserted} nuevos ítems almacenados ({len(df)} procesados, {len(df) - inserted} duplicados omitidos).")
+        logger.info("✓ %d nuevos ítems almacenados (%d procesados, %d duplicados omitidos).", inserted, len(df), len(df) - inserted)
 
         return inserted
 
-    except Exception as e:
-        logger.error(f"Fallo en la infiltracion: {e}")
+    except (requests.exceptions.RequestException, sqlite3.Error, KeyError, ValueError) as e:
+        logger.error("Fallo en la infiltracion: %s", e)
         return -1
 
 if __name__ == "__main__":

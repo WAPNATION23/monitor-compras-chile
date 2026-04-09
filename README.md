@@ -4,7 +4,7 @@
 
 ![Beta Pública](https://img.shields.io/badge/Estado-Beta%20Pública-orange)
 ![Python](https://img.shields.io/badge/Python-3.10%2B-blue)
-![Tests](https://img.shields.io/badge/Tests-47%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/Tests-65%20passing-brightgreen)
 ![CI](https://img.shields.io/github/actions/workflow/status/WAPNATION23/monitor-compras-chile/ci.yml?label=CI)
 ![Licencia](https://img.shields.io/badge/Licencia-AGPL--3.0-blue)
 
@@ -34,7 +34,7 @@ Plataforma open source que extrae, procesa y analiza órdenes de compra del Merc
 ## Instalación
 
 ```bash
-git clone https://github.com/tu-usuario/monitor-compras-chile.git
+git clone https://github.com/WAPNATION23/monitor-compras-chile.git
 cd monitor-compras-chile
 pip install -r requirements.txt
 ```
@@ -115,7 +115,7 @@ Estas limitaciones están documentadas como issues abiertos para mejora continua
 py -m pytest tests/test_core.py -q
 ```
 
-47 tests cubriendo: procesador (ETL, deduplicación, migración de esquema), detector (IQR, Z-score, Benford), cross_referencer (concentración, rankings, SERVEL), infiltrador IA, queries, chat service, configuración, backup (create/restore/list), extractor (max_oc=0).
+65 tests cubriendo: procesador (ETL, deduplicación, migración de esquema, validación RUT), detector (IQR, Z-score, Benford), cross_referencer (concentración, rankings, SERVEL), notificador (anti-spam, dedup, truncación), extractor (retry, max_oc), chat service (errores DB, timeout, rate limit), configuración, backup (create/restore/list).
 
 ---
 

@@ -12,13 +12,13 @@ from datetime import datetime
 import requests
 from dotenv import load_dotenv
 
-from config import API_OC_URL, REQUEST_TIMEOUT
+from config import API_OC_URL, DB_NAME, REQUEST_TIMEOUT
 
 logger = logging.getLogger(__name__)
 
 load_dotenv()
 
-DB_PATH = "auditoria_estado.db"
+DB_PATH = DB_NAME
 
 _STOPWORDS = frozenset({
     "que", "para", "con", "los", "las", "del", "por", "una", "como", "este",

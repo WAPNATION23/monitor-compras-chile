@@ -6,7 +6,9 @@ Separadas de dashboard.py para mantener la UI desacoplada de la lógica de datos
 import sqlite3
 import pandas as pd
 
-DB_PATH = "auditoria_estado.db"
+from config import DB_NAME
+
+DB_PATH = DB_NAME
 
 
 def load_data() -> pd.DataFrame:

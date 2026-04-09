@@ -4,7 +4,9 @@ import time
 from infolobby_connector import InfoLobbyConnector
 import sqlite3
 
-DB_PATH = "auditoria_estado.db"
+from config import DB_NAME
+
+DB_PATH = DB_NAME
 
 logger = logging.getLogger(__name__)
 

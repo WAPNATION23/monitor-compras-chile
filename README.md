@@ -89,7 +89,11 @@ extractor.py         → Cliente API Mercado Público con paginación
 processor.py         → ETL: aplana OC → SQLite con deduplicación
 detector.py          → Análisis estadístico (Benford, Z-score, IQR)
 cross_referencer.py  → Cruces forenses entre fuentes de datos
-dashboard.py         → UI Streamlit (panel, cruces, chat IA)
+alertas_personas.py  → Motor de alertas "En la Mira" (5 fuentes reales)
+generar_expediente.py→ Generador CLI de expedientes por persona/empresa
+infolobby_connector.py→ Conector SPARQL + CSV a datos de InfoLobby
+dashboard.py         → UI Streamlit (panel, cruces, chat IA, alertas)
+chat_service.py      → Asistente IA con contexto DB + web
 config.py            → Configuración centralizada (sin secrets)
 notifier.py          → Alertas Telegram
 backup.py            → Backup/restauración de BD (SQLite backup API)

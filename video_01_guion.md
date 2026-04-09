@@ -74,25 +74,23 @@ Prompt: "Busca información sobre Camila Flores Oporto — aportes de campaña, 
 
 ---
 
-### BLOQUE 3: DEMO REAL CON DATA EXISTENTE (4:30 - 6:00)
-**[Mostrar los datos reales que SÍ tenemos]**
+### BLOQUE 3: DEMO EN VIVO DEL DASHBOARD (4:30 - 6:00)
+**[Mostrar dashboard corriendo con datos reales cargados]**
 
-> "Veamos qué SÍ podemos ver ahora mismo."
+> "Veamos qué puede hacer la herramienta ahora mismo."
 
 **[Mostrar Panel General del dashboard:]**
-- Top 10 aportantes por monto
-- Distribución de aportes por tipo de elección
-- Concentración: ¿pocos aportantes con montos altos?
+- Funcionalidad de búsqueda por proveedor o comprador
+- Cruces forenses: concentración de capital, trato directo
+- Pestaña "En la Mira": buscar alertas públicas de cualquier persona
 
-**[Señalar datos interesantes:]**
+**[Mostrar la pestaña En la Mira con búsqueda en vivo:]**
 
-> "Miren esto: MINERA ATACAMA aporta $25 millones a un candidato
-> a gobernador. ENERGÍAS RENOVABLES aporta $20 millones a otro.
-> MINERA COPIAPÓ: $18 millones.
+> "Escribo un nombre, y el sistema consulta InfoLobby, SERVEL,
+> datos.gob.cl, Contraloría y Mercado Público.
 >
-> ¿Qué tienen en común? Todas son empresas del sector extractivo
-> apostando fuerte por candidatos a gobernador.
-> ¿Casualidad? Investiguemos."
+> Todo en tiempo real. Todo de fuentes oficiales.
+> Si no hay datos, lo dice. No inventa nada."
 
 ---
 

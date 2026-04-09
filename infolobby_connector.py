@@ -43,7 +43,8 @@ INFOLOBBY_BASE: str = "https://www.infolobby.cl"
 SPARQL_ENDPOINT: str = "http://datos.infolobby.cl/sparql"
 
 # URLs conocidas de catálogos CSV desde datos.gob.cl / infolobby
-# Estas se actualizan periódicamente. Si fallan, se buscan dinámicamente.
+# Estas URLs son best-effort — pueden devolver 500 si InfoLobby las modifica.
+# Si fallan, se buscan dinámicamente.
 CATALOGOS_CONOCIDOS: dict[str, str] = {
     "audiencias": "https://www.infolobby.cl/Datos/audienciasBuscar",
     "sujetos_pasivos": "https://www.infolobby.cl/Datos/sujetosPasivosDescargar",
@@ -129,21 +130,23 @@ class InfoLobbyConnector:
             DataFrame con las audiencias.
         """
         # Intentar vía SPARQL (datos estructurados)
+        # NOTA: Prefijo cplt: verificado en el endpoint. Predicados no verificados
+        # — si el endpoint devuelve vacío, revisar esquema RDF en datos.infolobby.cl/sparql
         sparql = """
-        PREFIX lobby: <http://datos.infolobby.cl/def#>
+        PREFIX cplt: <http://datos.infolobby.cl/def#>
         PREFIX foaf: <http://xmlns.com/foaf/0.1/>
         PREFIX dcterms: <http://purl.org/dc/terms/>
 
         SELECT ?audiencia ?fecha ?sujetoPasivo ?sujetoActivo ?institucion ?materia
         WHERE {
-            ?audiencia a lobby:Audiencia ;
+            ?audiencia a cplt:RegistroAudiencia ;
                        dcterms:date ?fecha ;
-                       lobby:sujetoPasivo ?sp ;
-                       lobby:sujetoActivo ?sa .
+                       cplt:sujetoPasivo ?sp ;
+                       cplt:sujetoActivo ?sa .
             ?sp foaf:name ?sujetoPasivo .
             ?sa foaf:name ?sujetoActivo .
-            OPTIONAL { ?sp lobby:institucion ?inst . ?inst foaf:name ?institucion . }
-            OPTIONAL { ?audiencia lobby:materia ?materia . }
+            OPTIONAL { ?sp cplt:institucion ?inst . ?inst foaf:name ?institucion . }
+            OPTIONAL { ?audiencia cplt:materia ?materia . }
         }
         ORDER BY DESC(?fecha)
         LIMIT 500
@@ -177,20 +180,20 @@ class InfoLobbyConnector:
         nombre_safe = nombre.replace("\\", "\\\\").replace('"', '\\"').replace("'", "\\'")
         limit = min(max(int(limit), 1), 1000)
         sparql = f"""
-        PREFIX lobby: <http://datos.infolobby.cl/def#>
+        PREFIX cplt: <http://datos.infolobby.cl/def#>
         PREFIX foaf: <http://xmlns.com/foaf/0.1/>
         PREFIX dcterms: <http://purl.org/dc/terms/>
 
         SELECT ?fecha ?sujetoPasivo ?sujetoActivo ?institucion ?materia
         WHERE {{
-            ?audiencia a lobby:Audiencia ;
+            ?audiencia a cplt:RegistroAudiencia ;
                        dcterms:date ?fecha ;
-                       lobby:sujetoPasivo ?sp ;
-                       lobby:sujetoActivo ?sa .
+                       cplt:sujetoPasivo ?sp ;
+                       cplt:sujetoActivo ?sa .
             ?sp foaf:name ?sujetoPasivo .
             ?sa foaf:name ?sujetoActivo .
-            OPTIONAL {{ ?sp lobby:institucion ?inst . ?inst foaf:name ?institucion . }}
-            OPTIONAL {{ ?audiencia lobby:materia ?materia . }}
+            OPTIONAL {{ ?sp cplt:institucion ?inst . ?inst foaf:name ?institucion . }}
+            OPTIONAL {{ ?audiencia cplt:materia ?materia . }}
             FILTER(CONTAINS(LCASE(?sujetoPasivo), LCASE("{nombre_safe}")))
         }}
         ORDER BY DESC(?fecha)
@@ -213,20 +216,20 @@ class InfoLobbyConnector:
         nombre_safe = nombre_empresa.replace("\\", "\\\\").replace('"', '\\"').replace("'", "\\'")
         limit = min(max(int(limit), 1), 1000)
         sparql = f"""
-        PREFIX lobby: <http://datos.infolobby.cl/def#>
+        PREFIX cplt: <http://datos.infolobby.cl/def#>
         PREFIX foaf: <http://xmlns.com/foaf/0.1/>
         PREFIX dcterms: <http://purl.org/dc/terms/>
 
         SELECT ?fecha ?sujetoPasivo ?sujetoActivo ?institucion ?materia
         WHERE {{
-            ?audiencia a lobby:Audiencia ;
+            ?audiencia a cplt:RegistroAudiencia ;
                        dcterms:date ?fecha ;
-                       lobby:sujetoPasivo ?sp ;
-                       lobby:sujetoActivo ?sa .
+                       cplt:sujetoPasivo ?sp ;
+                       cplt:sujetoActivo ?sa .
             ?sp foaf:name ?sujetoPasivo .
             ?sa foaf:name ?sujetoActivo .
-            OPTIONAL {{ ?sp lobby:institucion ?inst . ?inst foaf:name ?institucion . }}
-            OPTIONAL {{ ?audiencia lobby:materia ?materia . }}
+            OPTIONAL {{ ?sp cplt:institucion ?inst . ?inst foaf:name ?institucion . }}
+            OPTIONAL {{ ?audiencia cplt:materia ?materia . }}
             FILTER(CONTAINS(LCASE(?sujetoActivo), LCASE("{nombre_safe}")))
         }}
         ORDER BY DESC(?fecha)
@@ -238,21 +241,22 @@ class InfoLobbyConnector:
 
     def descargar_donativos(self, limit: int = 500) -> pd.DataFrame:
         """Descarga el registro de donativos recibidos por autoridades."""
+        # NOTA: Clase cplt:Donativo y predicados NO verificados contra el esquema RDF
         sparql = f"""
-        PREFIX lobby: <http://datos.infolobby.cl/def#>
+        PREFIX cplt: <http://datos.infolobby.cl/def#>
         PREFIX foaf: <http://xmlns.com/foaf/0.1/>
         PREFIX dcterms: <http://purl.org/dc/terms/>
 
         SELECT ?fecha ?receptor ?donante ?descripcion ?monto
         WHERE {{
-            ?donativo a lobby:Donativo ;
+            ?donativo a cplt:Donativo ;
                       dcterms:date ?fecha ;
-                      lobby:receptor ?r ;
-                      lobby:donante ?d .
+                      cplt:receptor ?r ;
+                      cplt:donante ?d .
             ?r foaf:name ?receptor .
             ?d foaf:name ?donante .
-            OPTIONAL {{ ?donativo lobby:descripcion ?descripcion . }}
-            OPTIONAL {{ ?donativo lobby:monto ?monto . }}
+            OPTIONAL {{ ?donativo cplt:descripcion ?descripcion . }}
+            OPTIONAL {{ ?donativo cplt:monto ?monto . }}
         }}
         ORDER BY DESC(?fecha)
         LIMIT {limit}
@@ -263,21 +267,22 @@ class InfoLobbyConnector:
 
     def descargar_viajes(self, limit: int = 500) -> pd.DataFrame:
         """Descarga el registro de viajes de autoridades financiados por terceros."""
+        # NOTA: Clase cplt:Viaje y predicados NO verificados contra el esquema RDF
         sparql = f"""
-        PREFIX lobby: <http://datos.infolobby.cl/def#>
+        PREFIX cplt: <http://datos.infolobby.cl/def#>
         PREFIX foaf: <http://xmlns.com/foaf/0.1/>
         PREFIX dcterms: <http://purl.org/dc/terms/>
 
         SELECT ?fecha ?autoridad ?financiador ?destino ?motivo
         WHERE {{
-            ?viaje a lobby:Viaje ;
+            ?viaje a cplt:Viaje ;
                    dcterms:date ?fecha ;
-                   lobby:autoridad ?auth ;
-                   lobby:financiador ?fin .
+                   cplt:autoridad ?auth ;
+                   cplt:financiador ?fin .
             ?auth foaf:name ?autoridad .
             ?fin foaf:name ?financiador .
-            OPTIONAL {{ ?viaje lobby:destino ?destino . }}
-            OPTIONAL {{ ?viaje lobby:motivo ?motivo . }}
+            OPTIONAL {{ ?viaje cplt:destino ?destino . }}
+            OPTIONAL {{ ?viaje cplt:motivo ?motivo . }}
         }}
         ORDER BY DESC(?fecha)
         LIMIT {limit}

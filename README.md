@@ -25,7 +25,7 @@ Plataforma open source que extrae, procesa y analiza órdenes de compra del Merc
 | Detector estadístico | **Estable** | Benford, Z-score, IQR, concentración, trato directo |
 | Asistente IA (DeepSeek) | **Experimental** | Chat con búsqueda web + consulta local a DB. Requiere API key |
 | Notificador Telegram | **Experimental** | Envío de alertas automáticas. Requiere bot token |
-| Cruce SERVEL (donaciones) | **Operativo** | 30 registros de aportes electorales cargados, cruce con proveedores activo |
+| Cruce SERVEL (donaciones) | **Operativo** | Carga CSV real desde servel.cl, cruce con proveedores activo |
 | Cruce malla societaria | **Demo** | Lógica implementada, requiere scraper real del Diario Oficial |
 | Scraper InfoLobby | **Demo** | Conector esqueleto, API no disponible públicamente |
 

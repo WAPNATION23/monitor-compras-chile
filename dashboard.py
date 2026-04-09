@@ -786,7 +786,7 @@ def main():
         with col_leg1:
             st.info("📉 **Ley de Compras Públicas**\n\nRevisa el estado de proyectos de ley relacionados.\n\n[Buscar en Senado.cl](https://www.senado.cl/appsenado/templates/tramitacion/index.html)")
         with col_leg2:
-            st.error("🚨 **Subvenciones y Transferencias**\n\nMonitorea cambios normativos en subvenciones públicas.\n\n[Buscar en Cámara](https://www.camara.cl/legislacion/ProyectosDeLey/proyectos_702702702702702ley.aspx)")
+            st.error("🚨 **Subvenciones y Transferencias**\n\nMonitorea cambios normativos en subvenciones públicas.\n\n[Buscar en Cámara](https://www.camara.cl/legislacion/ProyectosDeLey/proyectos_ley.aspx)")
         with col_leg3:
             st.warning("🚧 **Transparencia y Probidad**\n\nSigue los proyectos de ley sobre transparencia.\n\n[Buscar en BCN](https://www.bcn.cl/leychile)")
 

@@ -61,9 +61,8 @@ class Alerta:
 CKAN_BASE = "https://datos.gob.cl/api/3/action"
 SPARQL_ENDPOINT = "http://datos.infolobby.cl/sparql"
 
-# Contraloría: buscador de jurisprudencia (dictámenes públicos)
-# Este endpoint acepta JSON y devuelve resultados paginados.
-CGR_BUSCAR_URL = "https://www.contraloria.cl/appinf/lgd/api/jurisprudencia/buscar"
+# Contraloría: no tiene API pública estable.
+# El buscador web está en https://www.contraloria.cl/web/cgr/buscar
 
 # IDs de recursos (DataStore) con datos de sanciones en datos.gob.cl
 # Verificados como activos con datastore_active=true
@@ -157,21 +156,24 @@ class AlertasPersonas:
         # Sanitizar nombre para SPARQL
         nombre_safe = nombre.replace("\\", "\\\\").replace('"', '\\"').replace("'", "\\'")
 
+        # NOTA: La ontología usa el prefijo cplt: según el endpoint SPARQL.
+        # Los predicados (sujetoPasivo, etc.) no están verificados — si el
+        # endpoint devuelve 403 o resultados vacíos, revisar el esquema RDF.
         sparql = f"""
-        PREFIX lobby: <http://datos.infolobby.cl/def#>
+        PREFIX cplt: <http://datos.infolobby.cl/def#>
         PREFIX foaf: <http://xmlns.com/foaf/0.1/>
         PREFIX dcterms: <http://purl.org/dc/terms/>
 
         SELECT ?fecha ?sujetoPasivo ?sujetoActivo ?institucion ?materia
         WHERE {{
-            ?audiencia a lobby:Audiencia ;
+            ?audiencia a cplt:RegistroAudiencia ;
                        dcterms:date ?fecha ;
-                       lobby:sujetoPasivo ?sp ;
-                       lobby:sujetoActivo ?sa .
+                       cplt:sujetoPasivo ?sp ;
+                       cplt:sujetoActivo ?sa .
             ?sp foaf:name ?sujetoPasivo .
             ?sa foaf:name ?sujetoActivo .
-            OPTIONAL {{ ?sp lobby:institucion ?inst . ?inst foaf:name ?institucion . }}
-            OPTIONAL {{ ?audiencia lobby:materia ?materia . }}
+            OPTIONAL {{ ?sp cplt:institucion ?inst . ?inst foaf:name ?institucion . }}
+            OPTIONAL {{ ?audiencia cplt:materia ?materia . }}
             FILTER(
                 CONTAINS(LCASE(?sujetoPasivo), LCASE("{nombre_safe}"))
                 || CONTAINS(LCASE(?sujetoActivo), LCASE("{nombre_safe}"))
@@ -348,14 +350,14 @@ class AlertasPersonas:
         alertas: list[Alerta] = []
 
         # Intentar el buscador de jurisprudencia de la CGR
-        # Este endpoint puede cambiar — se degrada gracefully
+        # NOTA: La Contraloría NO tiene API pública documentada.
+        # Este endpoint es best-effort y puede devolver 404.
+        # Si falla, se genera una referencia al buscador web manual.
         try:
             resp = self.session.get(
-                "https://www.contraloria.cl/pdfbuscador/juridica/buscar",
+                "https://www.contraloria.cl/web/cgr/buscar",
                 params={
-                    "texto": nombre,
-                    "limit": 10,
-                    "offset": 0,
+                    "q": nombre,
                 },
                 timeout=REQUEST_TIMEOUT,
                 allow_redirects=True,

@@ -203,6 +203,102 @@ COLOR_DISCRETE_MAP = {
 def _cached_load():
     return load_data()
 
+
+def _render_empty_state():
+    """Pantalla de bienvenida cuando no hay datos cargados."""
+    st.markdown("""
+    <div style="text-align:center; padding: 40px 20px;">
+        <h2 style="color:#4FC3F7;">Bienvenido a Ojo del Pueblo</h2>
+        <p style="color:#aaa; font-size:1.1em; max-width:600px; margin:auto;">
+            La base de datos está vacía. Para empezar a fiscalizar, necesitas
+            extraer datos <b>reales</b> desde la API de Mercado Público (ChileCompra).
+        </p>
+    </div>
+    """, unsafe_allow_html=True)
+
+    st.markdown("---")
+
+    col1, col2 = st.columns(2)
+    with col1:
+        st.markdown("#### Extraer datos ahora")
+        st.caption("Descarga órdenes de compra de ayer directamente desde aquí.")
+        max_oc = st.selectbox("Cantidad de OC a extraer", [100, 500, 1000, 5000], index=0)
+        if st.button("Extraer datos de Mercado Público", type="primary", use_container_width=True):
+            _run_extraction(max_oc)
+
+    with col2:
+        st.markdown("#### Configuración necesaria")
+        ticket = os.getenv("MERCADO_PUBLICO_TICKET", "")
+        deepseek = os.getenv("DEEPSEEK_API_KEY", "")
+
+        if ticket:
+            st.success("MERCADO_PUBLICO_TICKET configurado")
+        else:
+            st.error("MERCADO_PUBLICO_TICKET no configurado")
+
+        if deepseek:
+            st.success("DEEPSEEK_API_KEY configurado")
+        else:
+            st.warning("DEEPSEEK_API_KEY no configurado (chat IA desactivado)")
+
+        if not ticket:
+            st.markdown("""
+            **En Streamlit Cloud:**
+            1. Ve a **Settings → Secrets**
+            2. Agrega:
+            ```toml
+            MERCADO_PUBLICO_TICKET = "tu_ticket"
+            DEEPSEEK_API_KEY = "tu_clave"
+            ```
+            3. Recarga la app
+            """)
+
+
+def _run_extraction(max_oc: int):
+    """Ejecuta extracción ligera desde el dashboard."""
+    from datetime import date, timedelta
+    from config import API_TICKET
+
+    if not API_TICKET:
+        st.error("No se puede extraer sin MERCADO_PUBLICO_TICKET. Configúralo primero.")
+        return
+
+    try:
+        from extractor import MercadoPublicoExtractor
+        from processor import DataProcessor
+        from detector import AnomalyDetector
+
+        fecha = date.today() - timedelta(days=1)
+        with st.status(f"Extrayendo OC del {fecha.strftime('%d/%m/%Y')}...", expanded=True) as status:
+            st.write("Conectando con API de Mercado Público...")
+            extractor = MercadoPublicoExtractor()
+            ordenes = extractor.extract(fecha, max_oc=max_oc)
+
+            if not ordenes:
+                status.update(label="Sin datos para esa fecha", state="error")
+                st.warning("La API no devolvió órdenes. Puede que el ticket haya expirado.")
+                return
+
+            st.write(f"{len(ordenes)} órdenes descargadas. Procesando...")
+            processor = DataProcessor()
+            df, inserted = processor.process_and_store(ordenes)
+
+            st.write(f"{inserted} ítems almacenados. Analizando anomalías...")
+            detector = AnomalyDetector()
+            anomalies = detector.detect(method="serenata")
+            n_anomalies = len(anomalies) if anomalies is not None else 0
+
+            status.update(label=f"Listo: {len(ordenes)} OC, {inserted} ítems, {n_anomalies} anomalías", state="complete")
+
+        st.success("Datos cargados exitosamente. Recargando dashboard...")
+        _cached_load.clear()
+        st.rerun()
+
+    except Exception as exc:
+        logger.error("Error en extracción desde dashboard: %s", exc)
+        st.error(f"Error durante la extracción: {exc}")
+
+
 def main():
     init_feedback_db()
 
@@ -235,8 +331,7 @@ def main():
         st.stop()
 
     if df.empty:
-        st.error("Base de datos vacía o no inicializada.")
-        st.info("Ejecuta `python main.py` en la terminal para recargar los datos.")
+        _render_empty_state()
         return
 
     # ─────────────────────────────────────────────────────────────────────────

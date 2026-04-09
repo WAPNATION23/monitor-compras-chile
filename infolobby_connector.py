@@ -283,3 +283,78 @@ class InfoLobbyConnector:
         LIMIT {limit}
         """
         return self.query_sparql(sparql)
+
+    # ─────────────────── CSV Fallback (cuando SPARQL falla) ─────────────────── #
+
+    def _descargar_catalogo_csv(self, catalogo: str) -> pd.DataFrame:
+        """
+        Descarga un catálogo CSV directo desde InfoLobby.
+        Fallback cuando el endpoint SPARQL devuelve 403.
+
+        Args:
+            catalogo: Clave del catálogo ('audiencias', 'donativos', 'viajes',
+                      'sujetos_pasivos', 'sujetos_activos').
+        """
+        url = CATALOGOS_CONOCIDOS.get(catalogo)
+        if not url:
+            logger.error("Catálogo '%s' no reconocido.", catalogo)
+            return pd.DataFrame()
+
+        try:
+            logger.info("Descargando catálogo CSV: %s", catalogo)
+            response = self.session.get(url, timeout=REQUEST_TIMEOUT * 3)
+            response.raise_for_status()
+
+            # Intentar parsear como CSV (separadores comunes)
+            from io import StringIO
+            content = response.text
+            for sep in [";", ",", "\t"]:
+                try:
+                    df = pd.read_csv(StringIO(content), sep=sep)
+                    if len(df.columns) > 1:
+                        logger.info(
+                            "Catálogo '%s': %d registros, %d columnas.",
+                            catalogo, len(df), len(df.columns),
+                        )
+                        return df
+                except pd.errors.ParserError:
+                    continue
+
+            logger.warning("No se pudo parsear CSV de '%s'.", catalogo)
+            return pd.DataFrame()
+
+        except requests.exceptions.RequestException as exc:
+            logger.error("Error descargando catálogo '%s': %s", catalogo, exc)
+            return pd.DataFrame()
+
+    def buscar_en_catalogos(self, nombre: str) -> dict[str, pd.DataFrame]:
+        """
+        Busca un nombre en TODOS los catálogos CSV de InfoLobby.
+        Útil como fallback cuando SPARQL no está disponible.
+
+        Args:
+            nombre: Nombre parcial a buscar (case-insensitive).
+
+        Returns:
+            Dict con clave=catálogo, valor=DataFrame filtrado.
+        """
+        resultados: dict[str, pd.DataFrame] = {}
+        for catalogo in CATALOGOS_CONOCIDOS:
+            df = self._descargar_catalogo_csv(catalogo)
+            if df.empty:
+                continue
+            # Buscar en todas las columnas de texto
+            mask = df.apply(
+                lambda row: row.astype(str).str.contains(
+                    nombre, case=False, na=False
+                ).any(),
+                axis=1,
+            )
+            matches = df[mask]
+            if not matches.empty:
+                resultados[catalogo] = matches
+                logger.info(
+                    "Catálogo '%s': %d coincidencias para '%s'.",
+                    catalogo, len(matches), nombre,
+                )
+        return resultados

@@ -29,6 +29,7 @@ from queries import (
 )
 from chat_service import build_db_context, build_web_context, call_deepseek
 from config import DAILY_QUERY_LIMIT, OC_TIPO_TRATO_DIRECTO
+from alertas_personas import AlertasPersonas
 
 logger = logging.getLogger(__name__)
 
@@ -263,11 +264,12 @@ def main():
     # ─────────────────────────────────────────────────────────────────────────
     # ENRUTAMIENTO POR PESTAÑAS (Limpieza Visual)
     # ─────────────────────────────────────────────────────────────────────────
-    tab_estadisticas, tab_cruce, tab_registro, tab_medios, tab_analistas, tab_ia = st.tabs([
+    tab_estadisticas, tab_cruce, tab_registro, tab_medios, tab_mira, tab_analistas, tab_ia = st.tabs([
         "Panel General",
         "Cruces Forenses",
         "Datos Crudos",
         "Fuentes",
+        "🔍 En la Mira",
         "Denuncias",
         "Asistente IA"
     ])
@@ -680,7 +682,101 @@ def main():
             st.markdown("<a href='https://www.biobiochile.cl/bbtv' target='_blank' class='btn-portal'>📡 Sintonizar BioBio TV</a>", unsafe_allow_html=True)
 
     # ══════════════════════════════════════════════════════════════════════════
-    # PESTAÑA 5: INTELIGENCIA CIVIL (REPORTES Y LOBBY)
+    # PESTAÑA 5: EN LA MIRA — Alertas de Personas de Interés Público
+    # ══════════════════════════════════════════════════════════════════════════
+    with tab_mira:
+        st.markdown("### 🔍 Personas en la Mira")
+        st.caption(
+            "Búsqueda en fuentes oficiales del Estado de Chile: InfoLobby, datos.gob.cl, "
+            "Contraloría, SERVEL y Mercado Público. Solo datos reales y verificables."
+        )
+
+        col_buscar, col_opciones = st.columns([3, 1])
+        with col_buscar:
+            mira_nombre = st.text_input(
+                "Nombre de la persona",
+                placeholder="Ej: Camila Flores, Juan Pérez...",
+                key="mira_nombre_input",
+            )
+        with col_opciones:
+            mira_incluir_compras = st.checkbox("Incluir Mercado Público", value=False, key="mira_compras")
+
+        mira_buscar = st.button("🔎 Buscar alertas", key="mira_buscar_btn", type="primary")
+
+        if mira_buscar and mira_nombre.strip():
+            motor = AlertasPersonas()
+            with st.spinner(f"Consultando fuentes oficiales para '{mira_nombre}'..."):
+                alertas = motor.buscar(mira_nombre.strip(), incluir_compras=mira_incluir_compras)
+
+            if not alertas:
+                st.info(f"No se encontraron alertas públicas para **{mira_nombre}**.")
+            else:
+                # Resumen superior
+                fuentes_encontradas = sorted({a["fuente"] for a in alertas})
+                tipos_encontrados = sorted({a["tipo_alerta"] for a in alertas})
+
+                st.success(f"**{len(alertas)}** alerta(s) encontrada(s) en **{len(fuentes_encontradas)}** fuente(s).")
+
+                # Métricas rápidas
+                cols_metricas = st.columns(min(len(tipos_encontrados), 5))
+                for i, tipo in enumerate(tipos_encontrados[:5]):
+                    count = sum(1 for a in alertas if a["tipo_alerta"] == tipo)
+                    color_map = {
+                        "LOBBY": "🤝", "SANCIÓN": "⚖️", "DICTAMEN": "📜",
+                        "COMPRA_PUBLICA": "🛒", "APORTE_ELECTORAL": "🗳️",
+                    }
+                    icono = color_map.get(tipo, "📋")
+                    cols_metricas[i].metric(f"{icono} {tipo}", count)
+
+                st.markdown("---")
+
+                # Tarjetas de alerta estilo Microsoft
+                border_colors = {
+                    "LOBBY": "#0078d4",
+                    "SANCIÓN": "#d13438",
+                    "DICTAMEN": "#8764b8",
+                    "COMPRA_PUBLICA": "#107c10",
+                    "APORTE_ELECTORAL": "#ff8c00",
+                }
+
+                for alerta in alertas:
+                    bcolor = border_colors.get(alerta["tipo_alerta"], "#666666")
+                    fecha_display = alerta["fecha"] if alerta["fecha"] != "sin fecha" else "—"
+                    url_link = (
+                        f"<a href='{alerta['url']}' target='_blank' "
+                        f"style='color:{bcolor};text-decoration:none;'>Ver fuente ↗</a>"
+                        if alerta["url"] else ""
+                    )
+                    card_html = f"""
+                    <div style="
+                        border-left: 4px solid {bcolor};
+                        background: #1e1e1e;
+                        padding: 12px 16px;
+                        margin-bottom: 8px;
+                        border-radius: 4px;
+                    ">
+                        <div style="display:flex;justify-content:space-between;align-items:center;">
+                            <span style="color:{bcolor};font-weight:600;font-size:0.85em;">
+                                {alerta['tipo_alerta']}
+                            </span>
+                            <span style="color:#888;font-size:0.8em;">{fecha_display}</span>
+                        </div>
+                        <div style="color:#ccc;font-size:0.8em;margin-top:2px;">
+                            {alerta['fuente']}
+                        </div>
+                        <div style="color:#eee;margin-top:6px;font-size:0.9em;">
+                            {alerta['descripcion']}
+                        </div>
+                        <div style="margin-top:6px;">{url_link}</div>
+                    </div>
+                    """
+                    st.markdown(card_html, unsafe_allow_html=True)
+
+        elif mira_buscar:
+            st.warning("Ingresa un nombre para buscar.")
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # PESTAÑA 6: INTELIGENCIA CIVIL (REPORTES Y LOBBY)
     # ══════════════════════════════════════════════════════════════════════════
     with tab_analistas:
         st.markdown("### Radar Legislativo Oficial")

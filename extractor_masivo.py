@@ -41,20 +41,20 @@ def vacuum_infolobby():
             logger.info("Descargando bloque %d a %d...", offset, offset + lote_size)
 
             sparql_paginado = f"""
-                PREFIX lobby: <http://datos.infolobby.cl/def#>
+                PREFIX cplt: <http://datos.infolobby.cl/def#>
                 PREFIX foaf: <http://xmlns.com/foaf/0.1/>
                 PREFIX dcterms: <http://purl.org/dc/terms/>
 
                 SELECT ?fecha ?sujetoPasivo ?sujetoActivo ?institucion ?materia
                 WHERE {{
-                    ?audiencia a lobby:Audiencia ;
+                    ?audiencia a cplt:RegistroAudiencia ;
                                dcterms:date ?fecha ;
-                               lobby:sujetoPasivo ?sp ;
-                               lobby:sujetoActivo ?sa .
+                               cplt:sujetoPasivo ?sp ;
+                               cplt:sujetoActivo ?sa .
                     ?sp foaf:name ?sujetoPasivo .
                     ?sa foaf:name ?sujetoActivo .
-                    OPTIONAL {{ ?sp lobby:institucion ?inst . ?inst foaf:name ?institucion . }}
-                    OPTIONAL {{ ?audiencia lobby:materia ?materia . }}
+                    OPTIONAL {{ ?sp cplt:institucion ?inst . ?inst foaf:name ?institucion . }}
+                    OPTIONAL {{ ?audiencia cplt:materia ?materia . }}
                 }}
                 ORDER BY DESC(?fecha)
                 LIMIT {lote_size}

@@ -3,10 +3,17 @@ Dashboard interactivo para "Ojo del Pueblo".
 Construido con Streamlit.
 """
 
+import logging
+import os
 import re
+import sqlite3
+import urllib.parse
+
+import requests
+
 import pandas as pd
-import streamlit as st
 import plotly.express as px
+import streamlit as st
 from datetime import datetime
 
 from queries import (
@@ -23,22 +30,17 @@ from queries import (
 from chat_service import build_db_context, build_web_context, call_deepseek
 from config import DAILY_QUERY_LIMIT, OC_TIPO_TRATO_DIRECTO
 
+logger = logging.getLogger(__name__)
+
+_LOGO_PATH = "logo_ojo_pueblo.png"
+
 # ─────────────────────────────────────────────────────────────────────────
 # CONFIGURACIÓN DE PÁGINA Y ESTILOS
 # ─────────────────────────────────────────────────────────────────────────
-st.set_page_config(
-    page_title="Ojo del Pueblo",
-    page_icon="logo_ojo_pueblo.png" if __import__('os').path.exists("logo_ojo_pueblo.png") else "O",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
 
-# Inyectar CSS ultra-profesional (Estilo Centro de Comando / OSINT)
-st.markdown("""
+_CUSTOM_CSS: str = """
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap');
-
-    /* Fondo principal y tipografía Space Grotesk */
     .stApp {
         background-color: #05080E;
         background-image:
@@ -48,15 +50,11 @@ st.markdown("""
         color: #D1D5DB;
         font-family: 'Space Grotesk', sans-serif;
     }
-
-    /* Panel lateral elegante cyber */
     .css-1r6slb0, .css-12oz5g7, div[data-testid="stSidebar"] {
         background-color: rgba(9, 13, 20, 0.95) !important;
         border-right: 1px solid #1E293B;
         backdrop-filter: blur(10px);
     }
-
-    /* Títulos y Header */
     h1, h2, h3, h4 {
         color: #F8FAFC !important;
         font-family: 'Space Grotesk', sans-serif;
@@ -70,115 +68,67 @@ st.markdown("""
         font-size: 2.2rem;
         text-shadow: 0px 0px 15px rgba(37, 99, 235, 0.2);
     }
-
-    /* Metrics y KPIs */
     [data-testid="stMetricValue"] {
-        font-size: 1.5rem;
-        font-weight: 700;
-        color: #FFFFFF !important;
+        font-size: 1.5rem; font-weight: 700; color: #FFFFFF !important;
         background: -webkit-linear-gradient(45deg, #60A5FA, #FFFFFF);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
+        -webkit-background-clip: text; -webkit-text-fill-color: transparent;
     }
     [data-testid="stMetricLabel"] {
-        font-size: 0.75rem;
-        color: #94A3B8 !important;
-        text-transform: uppercase;
-        letter-spacing: 0.05em;
+        font-size: 0.75rem; color: #94A3B8 !important;
+        text-transform: uppercase; letter-spacing: 0.05em;
     }
     div[data-testid="metric-container"] {
-        background: rgba(15, 23, 42, 0.6);
-        border: 1px solid #1E293B;
-        padding: 12px 10px;
-        border-radius: 8px;
+        background: rgba(15, 23, 42, 0.6); border: 1px solid #1E293B;
+        padding: 12px 10px; border-radius: 8px;
         box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
     }
-
-    /* Chat input */
-    .stChatInput {
-        border-color: #334155 !important;
-    }
-
-    /* Download buttons */
+    .stChatInput { border-color: #334155 !important; }
     .stDownloadButton > button {
-        background-color: #1E293B !important;
-        color: #94A3B8 !important;
-        border: 1px solid #334155 !important;
-        font-size: 0.8rem;
+        background-color: #1E293B !important; color: #94A3B8 !important;
+        border: 1px solid #334155 !important; font-size: 0.8rem;
     }
     .stDownloadButton > button:hover {
-        background-color: #334155 !important;
-        color: #F8FAFC !important;
+        background-color: #334155 !important; color: #F8FAFC !important;
     }
-
-    /* Pestañas (Tabs) - Sin scroll horizontal */
     .stTabs [data-baseweb="tab-list"] {
-        gap: 4px;
-        background-color: transparent;
-        padding-bottom: 0px;
-        border-bottom: 1px solid #334155;
-        flex-wrap: wrap;
-        overflow-x: visible !important;
+        gap: 4px; background-color: transparent; padding-bottom: 0px;
+        border-bottom: 1px solid #334155; flex-wrap: wrap; overflow-x: visible !important;
     }
-    .stTabs [data-baseweb="tab-list"] button[role="tab"] {
-        flex: 1 1 auto;
-        min-width: 0;
-    }
+    .stTabs [data-baseweb="tab-list"] button[role="tab"] { flex: 1 1 auto; min-width: 0; }
     .stTabs [data-baseweb="tab"] {
-        background-color: #0F172A;
-        border: 1px solid #334155;
-        border-bottom: none;
-        padding: 8px 12px;
-        transition: all 0.3s ease;
-        color: #94A3B8;
-        font-weight: 600;
-        border-radius: 6px 6px 0 0;
-        font-size: 0.78rem;
-        text-transform: uppercase;
-        letter-spacing: 0.03em;
-        white-space: nowrap;
+        background-color: #0F172A; border: 1px solid #334155; border-bottom: none;
+        padding: 8px 12px; transition: all 0.3s ease; color: #94A3B8;
+        font-weight: 600; border-radius: 6px 6px 0 0;
+        font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.03em; white-space: nowrap;
     }
     .stTabs [aria-selected="true"] {
-        background-color: #1E293B !important;
-        color: #38BDF8 !important;
-        border-color: #38BDF8;
-        border-width: 2px 2px 0px 2px;
+        background-color: #1E293B !important; color: #38BDF8 !important;
+        border-color: #38BDF8; border-width: 2px 2px 0px 2px;
     }
-    /* Ocultar flechas de scroll en tabs */
-    .stTabs [data-baseweb="tab-list"] > div[role="presentation"] {
-        display: none !important;
-    }
-
-    /* Dataframe y Tablas */
+    .stTabs [data-baseweb="tab-list"] > div[role="presentation"] { display: none !important; }
     [data-testid="stDataFrame"] {
-        border-radius: 8px;
-        border: 1px solid #1E293B;
-        overflow: hidden;
+        border-radius: 8px; border: 1px solid #1E293B; overflow: hidden;
         box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
     }
-
-    /* Alertas de Protocolo */
-    .stAlert {
-        border-radius: 6px;
-        border: 1px solid #7F1D1D;
-        background: rgba(127, 29, 29, 0.1) !important;
-    }
-
-    /* Blockquote - explainer box */
+    .stAlert { border-radius: 6px; border: 1px solid #7F1D1D; background: rgba(127, 29, 29, 0.1) !important; }
     blockquote {
         background: rgba(37, 99, 235, 0.1) !important;
         border-left: 3px solid #3B82F6 !important;
-        padding: 12px 16px !important;
-        border-radius: 0 8px 8px 0;
-        color: #94A3B8 !important;
-        font-size: 0.85rem;
-        margin-bottom: 20px;
+        padding: 12px 16px !important; border-radius: 0 8px 8px 0;
+        color: #94A3B8 !important; font-size: 0.85rem; margin-bottom: 20px;
     }
-    blockquote p {
-        margin: 0 !important;
-    }
+    blockquote p { margin: 0 !important; }
 </style>
-""", unsafe_allow_html=True)
+"""
+st.set_page_config(
+    page_title="Ojo del Pueblo",
+    page_icon=_LOGO_PATH if os.path.exists(_LOGO_PATH) else "O",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+# Inyectar CSS profesional (Estilo Centro de Comando / OSINT)
+st.markdown(_CUSTOM_CSS, unsafe_allow_html=True)
 
 # ─────────────────────────────────────────────────────────────────────────
 # CONFIGURACIONES Y CONSTANTES
@@ -213,17 +163,15 @@ def main():
     # ENCABEZADO PRINCIPAL (Compacto)
     col_t1, col_t2 = st.columns([0.1, 0.9])
     with col_t1:
-        import os
-        if os.path.exists("logo_ojo_pueblo.png"):
-            st.image("logo_ojo_pueblo.png", use_container_width=True)
+        if os.path.exists(_LOGO_PATH):
+            st.image(_LOGO_PATH, use_container_width=True)
     with col_t2:
         st.title("Ojo del Pueblo")
         st.markdown("*Fiscalización ciudadana de compras del Estado de Chile en tiempo real.*")
         st.caption(f"Datos de Mercado Público (API ChileCompra) | Actualizado: {datetime.now().strftime('%d/%m/%Y %H:%M')}")
 
     # VERIFICACIÓN DE BD
-    import os as _os
-    if not _os.path.exists(DB_PATH):
+    if not os.path.exists(DB_PATH):
         st.error("🚫 Base de datos no encontrada.")
         st.info(
             "Ejecuta el pipeline para crear la base de datos:\n\n"
@@ -234,7 +182,8 @@ def main():
     # CARGA DE DATOS
     try:
         df = _cached_load()
-    except Exception as exc:
+    except (OSError, pd.errors.DatabaseError) as exc:
+        logger.error("Error al cargar datos: %s", exc)
         st.error(f"Error al conectar con la base de datos: {exc}")
         st.info("Verifica que `auditoria_estado.db` no esté corrupta. Puedes restaurar un backup con:\n\n```bash\npython backup.py --list\npython backup.py --restore backups/<archivo>.db\n```")
         st.stop()
@@ -474,9 +423,6 @@ def main():
         st.caption("Detección de patrones sistemáticos mediante cruces de bases de datos públicas.")
 
         try:
-            import cross_referencer
-            import importlib
-            importlib.reload(cross_referencer)
             from cross_referencer import CrossReferencer
 
             xref = CrossReferencer(DB_PATH)
@@ -617,7 +563,8 @@ def main():
             else:
                 st.info("No hay datos de dueños reales vinculados al Mercado Público en la base local aún.")
 
-        except Exception as e:
+        except (OSError, pd.errors.DatabaseError, sqlite3.Error) as e:
+            logger.error("Error en cruces forenses: %s", e)
             st.error(f"Error cargando cruces forenses: {e}")
             st.info("Esto puede ocurrir si la base de datos está vacía o corrupta. Ejecuta `python main.py` para recargar datos.")
 
@@ -696,11 +643,11 @@ def main():
                     st.dataframe(df_lic, use_container_width=True, height=500, hide_index=True)
                 else:
                     st.info("No hay licitaciones cargadas aún.")
-            except Exception as exc:
+            except (OSError, pd.errors.DatabaseError) as exc:
                 st.info(f"Tabla de licitaciones no disponible: {exc}")
 
     # ══════════════════════════════════════════════════════════════════════════
-    # PESTAÑA 3: OJO DEL PUEBLO (MEDIOS Y TRANSMISIONES)
+    # PESTAÑA 4: FUENTES OFICIALES Y MEDIOS
     # ══════════════════════════════════════════════════════════════════════════
     with tab_medios:
         st.markdown("### Fuentes Oficiales y Medios")
@@ -733,7 +680,7 @@ def main():
             st.markdown("<a href='https://www.biobiochile.cl/bbtv' target='_blank' class='btn-portal'>📡 Sintonizar BioBio TV</a>", unsafe_allow_html=True)
 
     # ══════════════════════════════════════════════════════════════════════════
-    # PESTAÑA 4: INTELIGENCIA CIVIL (REPORTES Y LOBBY)
+    # PESTAÑA 5: INTELIGENCIA CIVIL (REPORTES Y LOBBY)
     # ══════════════════════════════════════════════════════════════════════════
     with tab_analistas:
         st.markdown("### Radar Legislativo Oficial")
@@ -771,7 +718,7 @@ def main():
 
             f_comentario = st.text_area("Análisis Forense (Descripción del modus operandi / Impacto):", height=120)
 
-            submit_btn = st.form_submit_button("� Enviar Reporte")
+            submit_btn = st.form_submit_button("📨 Enviar Reporte")
 
             if submit_btn:
                 if f_dato.strip() == "":
@@ -781,7 +728,7 @@ def main():
                     st.success(f"✅ Reporte sobre '{f_dato}' registrado correctamente.")
 
     # ══════════════════════════════════════════════════════════════════════════
-    # PESTAÑA 6: EL CEREBRO DEL OJO DE DIOS (CHATBOT FORENSE)
+    # PESTAÑA 6: ASISTENTE IA (CHATBOT FORENSE)
     # ══════════════════════════════════════════════════════════════════════════
     with tab_ia:
         st.markdown("### Asistente de Investigación")
@@ -824,8 +771,6 @@ def main():
 
                 with st.chat_message("assistant"):
                     with st.spinner("Procesando consulta..."):
-                        import os
-
                         api_key = os.getenv("DEEPSEEK_API_KEY", "")
                         if not api_key:
                             revelacion = "⚠️ Asistente IA no disponible: falta la clave DEEPSEEK_API_KEY en el archivo .env."
@@ -844,8 +789,9 @@ def main():
                                 revelacion = call_deepseek(
                                     st.session_state.ia_messages, web_context, db_context
                                 )
-                            except Exception as ia_exc:
+                            except (requests.RequestException, KeyError, ValueError) as ia_exc:
                                 revelacion = f"Error al consultar el asistente IA: {ia_exc}"
+                                logger.error("Error en chat IA: %s", ia_exc)
                                 st.error(revelacion)
 
                         # Interceptar comando de infiltración
@@ -878,7 +824,6 @@ def main():
     st.markdown("### Compartir hallazgos")
 
     share_text = f"Encontré datos interesantes en Ojo del Pueblo: {total_oc:,} órdenes de compra por {format_clp(total_gasto)} bajo fiscalización ciudadana."
-    import urllib.parse
     encoded_text = urllib.parse.quote(share_text)
 
     col_share1, col_share2, col_share3 = st.columns(3)

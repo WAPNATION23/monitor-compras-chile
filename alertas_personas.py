@@ -153,8 +153,10 @@ class AlertasPersonas:
         """Busca audiencias donde aparece la persona como sujeto activo o pasivo."""
         alertas: list[Alerta] = []
 
-        # Sanitizar nombre para SPARQL
-        nombre_safe = nombre.replace("\\", "\\\\").replace('"', '\\"').replace("'", "\\'")
+        # Sanitizar nombre para SPARQL — eliminar caracteres que puedan
+        # romper la sintaxis de la query (inyección SPARQL).
+        import re as _re
+        nombre_safe = _re.sub(r'[\\"\'\}\)\{\(<>;&|]', '', nombre).strip()
 
         # NOTA: La ontología usa el prefijo cplt: según el endpoint SPARQL.
         # Los predicados (sujetoPasivo, etc.) no están verificados — si el

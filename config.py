@@ -9,6 +9,7 @@ IMPORTANTE: NO poner tokens o secrets en este archivo.
            Usar variables de entorno o archivo .env (no versionado).
 """
 
+import logging
 import os
 from pathlib import Path
 
@@ -45,6 +46,11 @@ API_BUSCAR_COMPRADOR_URL: str = (
 # Ticket de prueba proporcionado por ChileCompra.
 # Para producción, solicitar uno propio en https://api.mercadopublico.cl → "Solicitud de Ticket".
 API_TICKET: str = os.getenv("MERCADO_PUBLICO_TICKET", "")
+if not API_TICKET:
+    logging.getLogger(__name__).warning(
+        "MERCADO_PUBLICO_TICKET no configurado — las consultas a la API de "
+        "Mercado Público fallarán. Configúralo en .env o como variable de entorno."
+    )
 
 # ──────────────────────────── Base de datos ────────────────────────────────── #
 DB_NAME: str = "auditoria_estado.db"

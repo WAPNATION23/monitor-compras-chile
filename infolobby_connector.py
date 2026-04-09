@@ -177,7 +177,8 @@ class InfoLobbyConnector:
             limit: Máximo de resultados.
         """
         # Sanitizar input para prevenir SPARQL injection
-        nombre_safe = nombre.replace("\\", "\\\\").replace('"', '\\"').replace("'", "\\'")
+        import re as _re
+        nombre_safe = _re.sub(r'[\\"\'\}\)\{\(<>;&|]', '', nombre).strip()
         limit = min(max(int(limit), 1), 1000)
         sparql = f"""
         PREFIX cplt: <http://datos.infolobby.cl/def#>

@@ -4,6 +4,7 @@ Construido con Streamlit.
 """
 
 import logging
+import html as html_mod
 import os
 import re
 import sqlite3
@@ -84,6 +85,50 @@ _CUSTOM_CSS: str = """
         box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
     }
     .stChatInput { border-color: #334155 !important; }
+    /* ── Chat Gemini-style ── */
+    .chat-container {
+        max-height: 520px;
+        overflow-y: auto;
+        padding: 16px 8px;
+        border: 1px solid #1E293B;
+        border-radius: 12px;
+        background: #0a0f1a;
+        margin-bottom: 12px;
+        scroll-behavior: smooth;
+    }
+    .chat-container::-webkit-scrollbar { width: 6px; }
+    .chat-container::-webkit-scrollbar-track { background: transparent; }
+    .chat-container::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
+    .chat-bubble {
+        max-width: 80%;
+        padding: 12px 16px;
+        border-radius: 18px;
+        margin-bottom: 8px;
+        font-size: 0.9rem;
+        line-height: 1.55;
+        word-wrap: break-word;
+    }
+    .chat-bubble p { margin: 0 0 6px 0; }
+    .chat-bubble p:last-child { margin-bottom: 0; }
+    .chat-row-user { display: flex; justify-content: flex-end; }
+    .chat-row-assistant { display: flex; justify-content: flex-start; }
+    .bubble-user {
+        background: #1d4ed8;
+        color: #e0e7ff;
+        border-bottom-right-radius: 4px;
+    }
+    .bubble-assistant {
+        background: #1e293b;
+        color: #d1d5db;
+        border: 1px solid #334155;
+        border-bottom-left-radius: 4px;
+    }
+    .chat-label {
+        font-size: 0.7rem;
+        color: #64748b;
+        margin-bottom: 2px;
+        padding: 0 4px;
+    }
     .stDownloadButton > button {
         background-color: #1E293B !important; color: #94A3B8 !important;
         border: 1px solid #334155 !important; font-size: 0.8rem;
@@ -827,7 +872,7 @@ def main():
     # PESTAÑA 6: ASISTENTE IA (CHATBOT FORENSE)
     # ══════════════════════════════════════════════════════════════════════════
     with tab_ia:
-        st.markdown("### Asistente de Investigación")
+        st.markdown("### 🤖 Asistente de Investigación")
         st.caption("Consulta perfiles de políticos, empresas o fundaciones. El asistente busca en la web y cruza con la base de datos.")
 
         if "ia_messages" not in st.session_state:
@@ -835,9 +880,41 @@ def main():
                 {"role": "assistant", "content": "Sistema listo. Puedo investigar perfiles de empresas, políticos o instituciones cruzando datos públicos. ¿Qué necesitas analizar?"}
             ]
 
-        for message in st.session_state.ia_messages:
-            with st.chat_message(message["role"]):
-                st.markdown(message["content"])
+        # ── Renderizar historial como burbujas Gemini-style ──
+        def _render_chat_bubbles(messages: list[dict]) -> str:
+            """Genera HTML de burbujas de chat."""
+            html_parts = []
+            for msg in messages:
+                if msg["role"] == "system":
+                    continue
+                is_user = msg["role"] == "user"
+                row_class = "chat-row-user" if is_user else "chat-row-assistant"
+                bubble_class = "bubble-user" if is_user else "bubble-assistant"
+                label = "Tú" if is_user else "Ojo del Pueblo"
+                align = "text-align:right;" if is_user else "text-align:left;"
+                # Escapar HTML en el contenido para seguridad
+                safe_content = html_mod.escape(msg["content"])
+                # Convertir saltos de línea a <br> y **bold** a <strong>
+                safe_content = safe_content.replace("\n", "<br>")
+                safe_content = re.sub(
+                    r"\*\*(.+?)\*\*", r"<strong>\1</strong>", safe_content
+                )
+                html_parts.append(
+                    f'<div class="chat-label" style="{align}">{label}</div>'
+                    f'<div class="{row_class}">'
+                    f'<div class="chat-bubble {bubble_class}">{safe_content}</div>'
+                    f'</div>'
+                )
+            return "\n".join(html_parts)
+
+        chat_html = _render_chat_bubbles(st.session_state.ia_messages)
+        # Contenedor con scroll automático al final
+        st.markdown(
+            f'<div class="chat-container" id="chat-scroll">{chat_html}</div>'
+            '<script>var c=document.getElementById("chat-scroll");'
+            'if(c)c.scrollTop=c.scrollHeight;</script>',
+            unsafe_allow_html=True,
+        )
 
         if "api_calls" not in st.session_state:
             st.session_state.api_calls = 0
@@ -862,40 +939,32 @@ def main():
             else:
                 st.session_state.api_calls += 1
                 increment_rate_limit_usage(user_ip, today_str)
-                st.chat_message("user").markdown(prompt)
                 st.session_state.ia_messages.append({"role": "user", "content": prompt})
 
-                with st.chat_message("assistant"):
-                    with st.spinner("Procesando consulta..."):
-                        api_key = os.getenv("DEEPSEEK_API_KEY", "")
-                        if not api_key:
-                            revelacion = "⚠️ Asistente IA no disponible: falta la clave DEEPSEEK_API_KEY en el archivo .env."
-                            st.warning(revelacion)
-                        else:
-                            try:
-                                # 0. Inteligencia local (DB + API)
-                                st.toast("Escaneando base de datos local...", icon="🔍")
-                                db_context = build_db_context(prompt)
+                with st.spinner("🔍 Procesando consulta..."):
+                    api_key = os.getenv("DEEPSEEK_API_KEY", "")
+                    if not api_key:
+                        revelacion = "⚠️ Asistente IA no disponible: falta la clave DEEPSEEK_API_KEY en el archivo .env."
+                    else:
+                        try:
+                            st.toast("Escaneando base de datos local...", icon="🔍")
+                            db_context = build_db_context(prompt)
 
-                                # 1. Búsqueda web
-                                st.toast("Buscando información actualizada en la web...", icon="🌐")
-                                web_context = build_web_context(prompt)
+                            st.toast("Buscando información actualizada en la web...", icon="🌐")
+                            web_context = build_web_context(prompt)
 
-                                # 2. Llamar a DeepSeek
-                                revelacion = call_deepseek(
-                                    st.session_state.ia_messages, web_context, db_context
-                                )
-                            except (requests.RequestException, KeyError, ValueError) as ia_exc:
-                                revelacion = f"Error al consultar el asistente IA: {ia_exc}"
-                                logger.error("Error en chat IA: %s", ia_exc)
-                                st.error(revelacion)
+                            revelacion = call_deepseek(
+                                st.session_state.ia_messages, web_context, db_context
+                            )
+                        except (requests.RequestException, KeyError, ValueError) as ia_exc:
+                            revelacion = f"Error al consultar el asistente IA: {ia_exc}"
+                            logger.error("Error en chat IA: %s", ia_exc)
 
-                        # Interceptar comando de infiltración
-                        infil_match = re.search(r"\[EJECUTAR_INFILTRACION:\s*([\d\.\-Kk]+)\]", revelacion)
+                    # Interceptar comando de infiltración
+                    infil_match = re.search(r"\[EJECUTAR_INFILTRACION:\s*([\d\.\-Kk]+)\]", revelacion)
+                    clean_response = revelacion.replace(infil_match.group(0) if infil_match else "", "")
 
-                        st.markdown(revelacion.replace(infil_match.group(0) if infil_match else "", ""))
-
-                st.session_state.ia_messages.append({"role": "assistant", "content": revelacion})
+                st.session_state.ia_messages.append({"role": "assistant", "content": clean_response})
 
                 if infil_match:
                     rut_detectado = infil_match.group(1)
@@ -911,7 +980,8 @@ def main():
                                 "role": "system",
                                 "content": f"SISTEMA: La infiltración para {rut_detectado} ha inyectado con éxito su historial a la base de datos SQL. Ahora el tablero de estadísticas detectará esta información."
                             })
-                            st.rerun()
+
+                st.rerun()
 
     # ─────────────────────────────────────────────────────────────────────────
     # COMPARTIR EN REDES SOCIALES

@@ -59,6 +59,15 @@ IQR_MULTIPLIER: float = 1.5        # Umbral IQR clásico (1.5 = outlier, 3.0 = o
 ZSCORE_THRESHOLD: float = 2.5      # Umbral Z-score para considerar sobreprecio
 MIN_OBSERVATIONS: int = 5          # Mínimo de registros históricos para calcular anomalías
 
+# Umbrales forenses (Serenata)
+MIN_AMOUNT_VAMPIRE: int = 10_000_000      # CLP — sospechoso en horario no hábil
+MIN_AMOUNT_FRACCIONAMIENTO: int = 1_900_000  # ~30 UTM — umbral para evasión de licitación
+FRACCIONAMIENTO_WINDOW_DAYS: int = 7       # Ventana de días para patrón de fraccionamiento
+FRACCIONAMIENTO_MIN_OCS: int = 3           # Mínimo de compras en la ventana
+MIN_CATEGORIAS_FANTASMA: int = 4           # Categorías distintas para "empresa de papel"
+MIN_MONTO_SPIDER: int = 5_000_000          # CLP — monto mínimo para Red de Araña
+DAILY_QUERY_LIMIT: int = 20               # Consultas IA por día por IP
+
 # ────────────────────── Notificaciones Telegram ───────────────────────────── #
 # Crear un bot con @BotFather y pegar el token aquí.
 # Para obtener el chat_id, envía un mensaje al bot y consulta:

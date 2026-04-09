@@ -3,6 +3,7 @@ Servicio del asistente IA (DeepSeek) con inteligencia local.
 Separado de dashboard.py para aislar la lógica de IA del UI.
 """
 
+import logging
 import os
 import re
 import sqlite3
@@ -10,6 +11,8 @@ from datetime import datetime
 
 import requests
 from dotenv import load_dotenv
+
+logger = logging.getLogger(__name__)
 
 load_dotenv()
 
@@ -26,12 +29,12 @@ _STOPWORDS = frozenset({
 
 
 def _extract_keywords(text: str) -> list[str]:
-    """Extrae palabras clave (3+ chars, sin stopwords) del texto."""
+    """Extrae palabras clave (3+ chars, sin stopwords) del texto. Máximo 10."""
     return [
         w
         for w in re.findall(r"[a-záéíóúñü]+", text.lower())
         if len(w) >= 3 and w not in _STOPWORDS
-    ]
+    ][:10]
 
 
 def build_db_context(prompt: str) -> str:
@@ -96,8 +99,8 @@ def build_db_context(prompt: str) -> str:
                                 db_context += f"- Fecha aceptación: {fechas.get('FechaAceptacion', 'N/A')}\n"
                                 db_context += f"- Estado: {oc_detail.get('Estado', 'N/A')}\n"
                                 db_context += f"- Monto total OC: ${oc_detail.get('Total', 0):,.0f} CLP\n"
-                    except Exception:
-                        pass
+                    except (requests.RequestException, KeyError, ValueError) as exc:
+                        logger.warning("Error consultando API Mercado Público para OC %s: %s", top_oc, exc)
 
             # Compradores/organismos
             params_comp = [f"%{p}%" for p in palabras[:5]]
@@ -117,7 +120,8 @@ def build_db_context(prompt: str) -> str:
                 db_context += "\n### ORGANISMOS COMPRADORES RELACIONADOS:\n"
                 for r in rows_comp:
                     db_context += f"- {r[0]}: {r[1]} OCs, ${r[2]:,.0f} CLP total\n"
-    except Exception:
+    except (sqlite3.Error, OSError) as exc:
+        logger.error("Error consultando DB local: %s", exc)
         db_context = ""
 
     return db_context
@@ -135,7 +139,8 @@ def build_web_context(prompt: str) -> str:
             for r in resultados:
                 parts.append(f"TITULO: {r.get('title')}\nTEXTO: {r.get('body')}\n")
             return "\n".join(parts)
-    except Exception:
+    except Exception as exc:
+        logger.warning("Error en búsqueda web: %s", exc)
         return "[No se pudo acceder a búsqueda web. Usando solo memoria interna.]"
 
 

@@ -155,10 +155,7 @@ def run_pipeline(
         4. Notificación  → Telegram (opcional)
     """
 
-    print("\n" + "═" * 70)
-    print("  🇨🇱  MONITOR CIUDADANO DE COMPRAS PÚBLICAS — CHILE")
-    print("  Inspirado en Operação Serenata de Amor 🇧🇷")
-    print("═" * 70)
+    logger.info("MONITOR CIUDADANO DE COMPRAS PÚBLICAS — CHILE (Serenata de Amor)")
 
     total_oc: int = 0
     total_items: int = 0
@@ -166,7 +163,7 @@ def run_pipeline(
 
     if not solo_analisis:
         # ── ETAPA 1: Extracción ──────────────────────────────── #
-        print(f"\n📥 Etapa 1: Extrayendo OC de {fecha.strftime('%d/%m/%Y')}...")
+        logger.info("Etapa 1: Extrayendo OC de %s...", fecha.strftime('%d/%m/%Y'))
         t_extract = time.perf_counter()
         extractor = MercadoPublicoExtractor()
         extract_kwargs = {}
@@ -183,12 +180,10 @@ def run_pipeline(
         )
 
         if not ordenes_raw:
-            print("⚠  No se encontraron órdenes de compra para esa fecha.")
-            print("   Esto puede ocurrir si la API no tiene datos o el ticket expiró.")
-            print("   Continuando con la detección de anomalías sobre datos existentes...\n")
+            logger.warning("No se encontraron OC para esa fecha. Puede ser que la API no tenga datos o el ticket expiró.")
         else:
             # ── ETAPA 2: Procesamiento ───────────────────────── #
-            print(f"\n🔄 Etapa 2: Procesando {len(ordenes_raw)} órdenes de compra...")
+            logger.info("Etapa 2: Procesando %d órdenes de compra...", len(ordenes_raw))
             t_process = time.perf_counter()
             processor = DataProcessor()
             df, inserted = processor.process_and_store(ordenes_raw)
@@ -222,10 +217,10 @@ def run_pipeline(
                     },
                 )
 
-            print(f"   ✓ {inserted} nuevos ítems almacenados ({total_items} procesados, {total_items - inserted} duplicados omitidos).")
+            logger.info("%d nuevos ítems almacenados (%d procesados, %d duplicados omitidos).", inserted, total_items, total_items - inserted)
 
     # ── ETAPA 3: Detección de Anomalías ──────────────────── #
-    print(f"\n🔍 Etapa 3: Detectando anomalías (método: {metodo})...\n")
+    logger.info("Etapa 3: Detectando anomalías (método: %s)...", metodo)
     t_detect = time.perf_counter()
     detector = AnomalyDetector()
 
@@ -253,18 +248,16 @@ def run_pipeline(
 
     # ── ETAPA 4: Notificación a Telegram (opcional) ──────── #
     if notificar_telegram:
-        print("\n📲 Etapa 4: Enviando alertas a Telegram...")
+        logger.info("Etapa 4: Enviando alertas a Telegram...")
 
         if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
-            print("   ⚠ Telegram no configurado.")
-            print("   Configura las variables de entorno TELEGRAM_TOKEN y TELEGRAM_CHAT_ID.")
-            print("   (O usa: python obtener_chat_id.py para obtener tu chat_id)")
+            logger.warning("Telegram no configurado. Configura TELEGRAM_TOKEN y TELEGRAM_CHAT_ID.")
             return
 
         try:
             tg = TelegramNotifier()
         except ValueError as exc:
-            print(f"   ⚠ Telegram no configurado: {exc}")
+            logger.warning("Telegram no configurado: %s", exc)
             return
 
         # Enviar cada anomalía como alerta individual (con anti-spam)
@@ -301,7 +294,7 @@ def run_pipeline(
         except Exception as exc:
             logger.warning("Error enviando resumen diario: %s", exc)
 
-        print(f"   ✓ {enviadas} alertas enviadas a Telegram ({omitidas} omitidas por anti-spam).")
+        logger.info("%d alertas enviadas a Telegram (%d omitidas por anti-spam).", enviadas, omitidas)
 
 
 # ──────────────────── Punto de entrada ──────────────────── #
@@ -330,14 +323,12 @@ if __name__ == "__main__":
             fecha_inicio = _parse_date(raw[:8])
             fecha_fin = _parse_date(raw[8:])
         except (ValueError, IndexError):
-            print(f"❌ Formato de rango inválido: '{args.rango_fechas}'. Use ddmmaaaa-ddmmaaaa.")
+            logger.error("Formato de rango inválido: '%s'. Use ddmmaaaa-ddmmaaaa.", args.rango_fechas)
             sys.exit(1)
 
         current = fecha_inicio
         while current <= fecha_fin:
-            print(f"\n{'━' * 70}")
-            print(f"  BACKFILL: {current.strftime('%d/%m/%Y')}")
-            print(f"{'━' * 70}")
+            logger.info("BACKFILL: %s", current.strftime('%d/%m/%Y'))
             try:
                 run_pipeline(
                     fecha=current,
@@ -347,7 +338,7 @@ if __name__ == "__main__":
                     max_oc=args.max_oc,
                 )
             except KeyboardInterrupt:
-                print("\n\n🛑 Ejecución interrumpida por el usuario.")
+                logger.info("Ejecución interrumpida por el usuario.")
                 sys.exit(130)
             except Exception as exc:
                 logging.getLogger(__name__).exception(
@@ -361,7 +352,7 @@ if __name__ == "__main__":
         try:
             target_date: date = _parse_date(args.fecha)
         except (ValueError, IndexError):
-            print(f"❌ Formato de fecha inválido: '{args.fecha}'. Use ddmmaaaa.")
+            logger.error("Formato de fecha inválido: '%s'. Use ddmmaaaa.", args.fecha)
             sys.exit(1)
     else:
         target_date = date.today() - timedelta(days=1)
@@ -375,7 +366,7 @@ if __name__ == "__main__":
             max_oc=args.max_oc,
         )
     except KeyboardInterrupt:
-        print("\n\n🛑 Ejecución interrumpida por el usuario.")
+        logger.info("Ejecución interrumpida por el usuario.")
         sys.exit(130)
     except Exception as exc:
         logging.getLogger(__name__).exception("Error fatal en el pipeline: %s", exc)

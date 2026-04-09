@@ -32,7 +32,18 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from config import DB_NAME, IQR_MULTIPLIER, MIN_OBSERVATIONS, ZSCORE_THRESHOLD
+from config import (
+    DB_NAME,
+    FRACCIONAMIENTO_MIN_OCS,
+    FRACCIONAMIENTO_WINDOW_DAYS,
+    IQR_MULTIPLIER,
+    MIN_AMOUNT_FRACCIONAMIENTO,
+    MIN_AMOUNT_VAMPIRE,
+    MIN_CATEGORIAS_FANTASMA,
+    MIN_MONTO_SPIDER,
+    MIN_OBSERVATIONS,
+    ZSCORE_THRESHOLD,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -145,7 +156,7 @@ class AnomalyDetector:
         if "fecha_creacion" not in df.columns or df.empty:
             return pd.DataFrame()
 
-        monto_sospechoso = 10_000_000  # 10 millones CLP
+        monto_sospechoso = MIN_AMOUNT_VAMPIRE
 
         df_valid = df.dropna(subset=["fecha_creacion"]).copy()
 
@@ -177,12 +188,12 @@ class AnomalyDetector:
         df_sorted = df_sorted.set_index("fecha_creacion")
         grouper = df_sorted.groupby(["rut_comprador", "rut_proveedor"])
 
-        # Ventana de 7 días
-        rolling_counts = grouper["codigo_oc"].rolling("7D").count()
-        rolling_sums = grouper["monto_total_item"].rolling("7D").sum()
+        # Ventana configurable
+        rolling_counts = grouper["codigo_oc"].rolling(f"{FRACCIONAMIENTO_WINDOW_DAYS}D").count()
+        rolling_sums = grouper["monto_total_item"].rolling(f"{FRACCIONAMIENTO_WINDOW_DAYS}D").sum()
 
-        # Criterio: Al menos 3 compras en 7 días sumando más de 1.9M CLP (aprox 30 UTM)
-        mask = (rolling_counts >= 3) & (rolling_sums > 1_900_000)
+        # Criterio: Al menos N compras en la ventana sumando más del umbral
+        mask = (rolling_counts >= FRACCIONAMIENTO_MIN_OCS) & (rolling_sums > MIN_AMOUNT_FRACCIONAMIENTO)
 
         indices_sospechosos = mask[mask].reset_index()
 
@@ -193,7 +204,7 @@ class AnomalyDetector:
         for _, row in indices_sospechosos.iterrows():
             comprador, proveedor, fecha = row["rut_comprador"], row["rut_proveedor"], row["fecha_creacion"]
 
-            fecha_inicio = fecha - pd.Timedelta(days=7)
+            fecha_inicio = fecha - pd.Timedelta(days=FRACCIONAMIENTO_WINDOW_DAYS)
             subset = df_sorted[
                 (df_sorted["rut_comprador"] == comprador) &
                 (df_sorted["rut_proveedor"] == proveedor)
@@ -226,8 +237,8 @@ class AnomalyDetector:
 
         cats_por_prov = df_valid.groupby(["rut_proveedor", "nombre_proveedor"])["categoria"].nunique().reset_index()
 
-        # Criterio empírico: Más de 4 categorías completamente distintas
-        rut_sospechosos = cats_por_prov[cats_por_prov["categoria"] >= 4]["rut_proveedor"]
+        # Criterio empírico: Más de N categorías completamente distintas
+        rut_sospechosos = cats_por_prov[cats_por_prov["categoria"] >= MIN_CATEGORIAS_FANTASMA]["rut_proveedor"]
 
         if rut_sospechosos.empty:
             return pd.DataFrame()
@@ -290,7 +301,7 @@ class AnomalyDetector:
         mask_humo = df_valid["nombre_producto"].str.upper().str.contains(regex_humo)
 
         import numpy as np
-        mask_redondo = (df_valid["monto_total_item"] >= 5_000_000) & (np.isclose(df_valid["monto_total_item"] % 1_000_000, 0, atol=0.01))
+        mask_redondo = (df_valid["monto_total_item"] >= MIN_MONTO_SPIDER) & (np.isclose(df_valid["monto_total_item"] % 1_000_000, 0, atol=0.01))
 
         is_spider = mask_humo & mask_redondo
         outliers = df_valid[is_spider].copy()

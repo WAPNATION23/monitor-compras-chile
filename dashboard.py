@@ -7,7 +7,6 @@ import re
 import pandas as pd
 import streamlit as st
 import plotly.express as px
-import sys
 from datetime import datetime
 
 from queries import (
@@ -22,7 +21,7 @@ from queries import (
     increment_rate_limit_usage,
 )
 from chat_service import build_db_context, build_web_context, call_deepseek
-from config import OC_TIPO_TRATO_DIRECTO
+from config import DAILY_QUERY_LIMIT, OC_TIPO_TRATO_DIRECTO
 
 # ─────────────────────────────────────────────────────────────────────────
 # CONFIGURACIÓN DE PÁGINA Y ESTILOS
@@ -804,19 +803,19 @@ def main():
         try:
             headers = st.context.headers
             user_ip = headers.get("X-Forwarded-For", headers.get("Host", "local")).split(",")[0].strip()
-        except Exception:
+        except (AttributeError, KeyError):
             user_ip = "local"
 
         today_str = datetime.now().strftime("%Y-%m-%d")
         daily_used = get_rate_limit_usage(user_ip, today_str)
 
-        daily_limit = 20
+        daily_limit = DAILY_QUERY_LIMIT
         remaining = max(0, daily_limit - daily_used)
         st.caption(f"Consultas restantes hoy: {remaining}/{daily_limit}")
 
         if prompt := st.chat_input("¿Qué quieres investigar?"):
             if remaining <= 0:
-                st.error("🛑 Límite diario alcanzado (20 consultas por día). Vuelve mañana.")
+                st.error(f"🛑 Límite diario alcanzado ({daily_limit} consultas por día). Vuelve mañana.")
             else:
                 st.session_state.api_calls += 1
                 increment_rate_limit_usage(user_ip, today_str)
@@ -858,13 +857,13 @@ def main():
 
                 if infil_match:
                     rut_detectado = infil_match.group(1)
-                    st.warning(f"� DESCARGA AUTOMÁTICA DE HISTORIAL PARA RUT: {rut_detectado}")
+                    st.warning(f"⚡ DESCARGA AUTOMÁTICA DE HISTORIAL PARA RUT: {rut_detectado}")
                     with st.spinner("Consultando registros públicos de Mercado Público vía API..."):
-                        import subprocess
+                        from infiltrador_ia import infiltrar_rut
                         target_rut = rut_detectado.replace(".", "").strip()
                         # Validar formato RUT estricto: 7-8 dígitos, guión, dígito verificador
                         if re.fullmatch(r"\d{7,8}-[\dkK]", target_rut):
-                            subprocess.run([sys.executable, "infiltrador_ia.py", target_rut], check=False)
+                            infiltrar_rut(target_rut)
                             st.success("✅ Descarga histórica exitosa en la DB local. Presiona F5 para cargar los radares.")
                             st.session_state.ia_messages.append({
                                 "role": "system",

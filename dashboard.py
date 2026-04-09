@@ -257,9 +257,9 @@ def _render_empty_state():
 def _run_extraction(max_oc: int):
     """Ejecuta extracción ligera desde el dashboard."""
     from datetime import date, timedelta
-    from config import API_TICKET
+    ticket = os.getenv("MERCADO_PUBLICO_TICKET", "")
 
-    if not API_TICKET:
+    if not ticket:
         st.error("No se puede extraer sin MERCADO_PUBLICO_TICKET. Configúralo primero.")
         return
 

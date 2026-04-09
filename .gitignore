@@ -32,9 +32,12 @@ oc_dump.json
 oc_output.txt
 *.log
 
-# CSVs locales (excepto datos SERVEL de ejemplo)
+# CSVs locales
 *.csv
-!servel_aportes_campañas_2024.csv
+
+# Scripts de exploración / scratch
+_explore_*.py
+_query_*.py
 
 # Backups locales
 backups/

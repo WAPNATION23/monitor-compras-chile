@@ -21,8 +21,8 @@ Thumbs.db
 *.env
 
 # Datos locales
-# La BD se genera localmente con main.py — cada usuario crea la suya.
-auditoria_estado.db
+# La BD seed se incluye en el repo para Streamlit Cloud.
+# auditoria_estado.db  ← ahora se versiona como seed
 *.db-journal
 
 # Archivos temporales de test

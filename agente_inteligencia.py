@@ -5,7 +5,11 @@ Módulo Dual: Scraping del Diario Oficial y Motor de Visión Artificial (OCR).
 import sqlite3
 import re
 import logging
-import fitz  # PyMuPDF
+
+try:
+    import fitz  # PyMuPDF — opcional, solo para OCR de resoluciones
+except ImportError:
+    fitz = None
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +49,9 @@ class AgenteInteligencia:
         """
         self._iniciar_db()
         texto_completo = ""
+        if fitz is None:
+            logger.error("PyMuPDF no instalado. Instala con: pip install PyMuPDF")
+            return {"error": "PyMuPDF no disponible"}
         try:
             with fitz.open(filepath) as doc:
                 for page in doc:
@@ -79,7 +86,7 @@ class AgenteInteligencia:
 
             return resultado
 
-        except (OSError, fitz.FileDataError, sqlite3.Error) as e:
+        except (OSError, sqlite3.Error, Exception) as e:
             return {"error": str(e)}
 
 if __name__ == "__main__":

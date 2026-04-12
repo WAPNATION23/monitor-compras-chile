@@ -1757,8 +1757,30 @@ def main():
             unsafe_allow_html=True,
         )
 
-        radar_antofagasta = st.checkbox("Solo Antofagasta")
-        radar_region = st.text_input("Región específica", placeholder="Ej: Biobío", value="")
+        # Filtro por tipo de OC
+        tipos_disp = sorted(df['tipo_oc'].dropna().unique().tolist())
+        _TIPO_LABELS = {"TD": "TD — Trato Directo", "SE": "SE — Sin Especificar",
+                        "AG": "AG — Compra Ágil", "CM": "CM — Convenio Marco",
+                        "CC": "CC — Contrato", "CT": "CT — Contratación"}
+        filtro_tipo = st.multiselect(
+            "Tipo de OC",
+            options=tipos_disp,
+            format_func=lambda x: _TIPO_LABELS.get(x, x),
+            default=[],
+        )
+
+        # Filtro por monto mínimo
+        filtro_monto_min = st.number_input(
+            "Monto mínimo ($CLP)", min_value=0, value=0, step=1_000_000,
+            help="Filtrar OC con monto total mayor a este valor",
+        )
+
+        # Filtro por organismo (top 20 compradores)
+        top_compradores = (
+            df.groupby('nombre_comprador')['monto_total_item'].sum()
+            .nlargest(30).index.tolist()
+        )
+        filtro_comprador = st.multiselect("Organismo comprador", options=top_compradores, default=[])
 
         categorias_disp = df['categoria_riesgo'].dropna().unique().tolist()
         filtro_cat = st.multiselect("Categoría de riesgo", options=categorias_disp, default=[])
@@ -1795,10 +1817,14 @@ def main():
             mask = mask | df_filtrado['nombre_producto'].str.lower().str.contains(query, na=False)
         df_filtrado = df_filtrado[mask]
 
-    if radar_antofagasta:
-        df_filtrado = df_filtrado[df_filtrado['nombre_comprador'].str.lower().str.contains("antofagasta", na=False)]
-    if radar_region:
-        df_filtrado = df_filtrado[df_filtrado['nombre_comprador'].str.lower().str.contains(radar_region.lower(), na=False)]
+    if filtro_tipo:
+        df_filtrado = df_filtrado[df_filtrado['tipo_oc'].isin(filtro_tipo)]
+    if filtro_monto_min > 0:
+        oc_montos = df_filtrado.groupby('codigo_oc')['monto_total_item'].sum()
+        oc_ok = oc_montos[oc_montos >= filtro_monto_min].index
+        df_filtrado = df_filtrado[df_filtrado['codigo_oc'].isin(oc_ok)]
+    if filtro_comprador:
+        df_filtrado = df_filtrado[df_filtrado['nombre_comprador'].isin(filtro_comprador)]
     if filtro_cat:
         df_filtrado = df_filtrado[df_filtrado['categoria_riesgo'].isin(filtro_cat)]
 

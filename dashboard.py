@@ -256,10 +256,20 @@ COLOR_DISCRETE_MAP = {
 _CHART_LAYOUT = dict(
     paper_bgcolor="rgba(0,0,0,0)",
     plot_bgcolor="rgba(0,0,0,0)",
-    font=dict(family="Inter, sans-serif", size=11, color="#94A3B8"),
-    margin=dict(l=0, r=0, t=10, b=0),
-    xaxis=dict(gridcolor="rgba(51,65,85,0.3)", zerolinecolor="rgba(51,65,85,0.3)"),
-    yaxis=dict(gridcolor="rgba(51,65,85,0.3)", zerolinecolor="rgba(51,65,85,0.3)"),
+    font=dict(family="Inter, sans-serif", size=12, color="#CBD5E1"),
+    margin=dict(l=10, r=80, t=20, b=40),
+    xaxis=dict(
+        gridcolor="rgba(51,65,85,0.3)", zerolinecolor="rgba(51,65,85,0.3)",
+        tickfont=dict(size=11, color="#94A3B8"),
+    ),
+    yaxis=dict(
+        gridcolor="rgba(51,65,85,0.3)", zerolinecolor="rgba(51,65,85,0.3)",
+        tickfont=dict(size=11, color="#94A3B8"),
+    ),
+    hoverlabel=dict(
+        bgcolor="#1E293B", font_size=12, font_color="#F1F5F9",
+        bordercolor="#334155",
+    ),
 )
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -454,14 +464,18 @@ def main():
     df_filtrado = df.copy()
 
     if filtro_global:
-        query = filtro_global.lower()
-        df_filtrado = df_filtrado[
-            df_filtrado['nombre_comprador'].str.lower().str.contains(query, na=False) |
-            df_filtrado['nombre_proveedor'].str.lower().str.contains(query, na=False) |
-            df_filtrado['codigo_oc'].str.lower().str.contains(query, na=False) |
-            df_filtrado['rut_proveedor'].str.lower().str.contains(query, na=False) |
-            df_filtrado['rut_comprador'].str.lower().str.contains(query, na=False)
-        ]
+        query = re.escape(filtro_global.lower())
+        mask = (
+            df_filtrado['nombre_comprador'].str.lower().str.contains(query, na=False)
+            | df_filtrado['nombre_proveedor'].str.lower().str.contains(query, na=False)
+            | df_filtrado['codigo_oc'].str.lower().str.contains(query, na=False)
+            | df_filtrado['rut_proveedor'].str.lower().str.contains(query, na=False)
+        )
+        if 'rut_comprador' in df_filtrado.columns:
+            mask = mask | df_filtrado['rut_comprador'].str.lower().str.contains(query, na=False)
+        if 'nombre_producto' in df_filtrado.columns:
+            mask = mask | df_filtrado['nombre_producto'].str.lower().str.contains(query, na=False)
+        df_filtrado = df_filtrado[mask]
 
     if radar_antofagasta:
         df_filtrado = df_filtrado[df_filtrado['nombre_comprador'].str.lower().str.contains("antofagasta", na=False)]
@@ -474,11 +488,14 @@ def main():
         desde, hasta = filtro_fecha
         ts_desde = pd.Timestamp(desde)
         ts_hasta = pd.Timestamp(hasta) + pd.Timedelta(days=1)
-        mask_fecha = df_filtrado['fecha_creacion'].notna()
+        mask_has_date = df_filtrado['fecha_creacion'].notna()
+        mask_in_range = (
+            (df_filtrado['fecha_creacion'] >= ts_desde)
+            & (df_filtrado['fecha_creacion'] < ts_hasta)
+        )
         df_filtrado = df_filtrado[
-            ~mask_fecha |
-            ((df_filtrado['fecha_creacion'] >= ts_desde) &
-             (df_filtrado['fecha_creacion'] < ts_hasta))
+            (~mask_has_date) |
+            (mask_has_date & mask_in_range)
         ]
 
 
@@ -542,15 +559,25 @@ def main():
                 top_prov = df_filtrado.groupby('nombre_proveedor')['monto_total_item'].sum().reset_index()
                 top_prov = top_prov.nlargest(10, 'monto_total_item').sort_values('monto_total_item', ascending=True)
                 top_prov['monto_label'] = top_prov['monto_total_item'].apply(format_clp)
+                top_prov['nombre_corto'] = top_prov['nombre_proveedor'].str[:35]
+                top_prov['hover_txt'] = (
+                    top_prov['nombre_proveedor'] + '<br>'
+                    + top_prov['monto_total_item'].apply(format_clp_full)
+                )
 
                 fig_bar = px.bar(
-                    top_prov, x='monto_total_item', y='nombre_proveedor', orientation='h',
-                    labels={'monto_total_item': 'Total ($CLP)', 'nombre_proveedor': ''},
+                    top_prov, x='monto_total_item', y='nombre_corto', orientation='h',
+                    labels={'monto_total_item': 'Total ($CLP)', 'nombre_corto': ''},
                     text='monto_label', template="plotly_dark",
-                    color_discrete_sequence=["#3B82F6"]
+                    color_discrete_sequence=["#3B82F6"],
+                    custom_data=['hover_txt'],
                 )
-                fig_bar.update_layout(**_CHART_LAYOUT)
-                fig_bar.update_traces(textposition='outside', textfont_size=10, textfont_color="#94A3B8")
+                fig_bar.update_layout(**_CHART_LAYOUT, height=420)
+                fig_bar.update_traces(
+                    textposition='outside', textfont_size=11, textfont_color="#CBD5E1",
+                    hovertemplate='%{customdata[0]}<extra></extra>',
+                )
+                fig_bar.update_xaxes(tickformat='~s', title_text='')
                 st.plotly_chart(fig_bar, use_container_width=True)
             else:
                 st.info("Sin datos suficientes.")
@@ -560,19 +587,31 @@ def main():
             if not df_filtrado.empty:
                 top_comp = df_filtrado.groupby('nombre_comprador')['monto_total_item'].sum().reset_index()
                 top_comp = top_comp.nlargest(10, 'monto_total_item')
+                top_comp['nombre_corto'] = top_comp['nombre_comprador'].str[:40]
+                top_comp['hover_txt'] = (
+                    top_comp['nombre_comprador'] + '<br>'
+                    + top_comp['monto_total_item'].apply(format_clp_full)
+                )
 
                 fig_pie = px.pie(
-                    top_comp, values='monto_total_item', names='nombre_comprador',
+                    top_comp, values='monto_total_item', names='nombre_corto',
                     hole=0.45,
                     color_discrete_sequence=["#3B82F6", "#6366F1", "#8B5CF6", "#A78BFA",
                                              "#10B981", "#14B8A6", "#F59E0B", "#F97316",
-                                             "#EF4444", "#EC4899"]
+                                             "#EF4444", "#EC4899"],
+                    custom_data=['hover_txt'],
                 )
-                fig_pie.update_traces(textposition='inside', textinfo='percent', textfont_size=10)
+                fig_pie.update_traces(
+                    textposition='inside', textinfo='percent', textfont_size=11,
+                    hovertemplate='%{customdata[0]}<extra></extra>',
+                )
                 fig_pie.update_layout(
                     **_CHART_LAYOUT,
-                    showlegend=True, height=400,
-                    legend=dict(font=dict(size=9, color="#94A3B8"), bgcolor="rgba(0,0,0,0)"),
+                    showlegend=True, height=420,
+                    legend=dict(
+                        font=dict(size=10, color="#CBD5E1"), bgcolor="rgba(0,0,0,0)",
+                        orientation="v", yanchor="middle", y=0.5,
+                    ),
                 )
                 st.plotly_chart(fig_pie, use_container_width=True)
             else:
@@ -607,8 +646,15 @@ def main():
                     labels={'monto': 'Monto Total', 'tipo_label': ''},
                     color='monto', color_continuous_scale=['#1E293B', '#3B82F6']
                 )
-                fig_tipo.update_layout(**_CHART_LAYOUT, showlegend=False, coloraxis_showscale=False)
-                fig_tipo.update_traces(textposition='outside', textfont_size=10, textfont_color="#94A3B8")
+                fig_tipo.update_layout(
+                    **_CHART_LAYOUT, showlegend=False, coloraxis_showscale=False,
+                    height=400,
+                )
+                fig_tipo.update_traces(
+                    textposition='outside', textfont_size=11, textfont_color="#CBD5E1",
+                    hovertemplate='%{y}<br>%{text}<extra></extra>',
+                )
+                fig_tipo.update_xaxes(tickformat='~s', title_text='')
                 st.plotly_chart(fig_tipo, use_container_width=True)
             else:
                 st.info("Sin datos.")
@@ -625,8 +671,13 @@ def main():
                         labels={'fecha': 'Fecha', 'monto': 'Gasto del día ($CLP)'},
                         color_discrete_sequence=['#3B82F6']
                     )
-                    fig_line.update_layout(**_CHART_LAYOUT, height=350)
-                    fig_line.update_traces(line=dict(width=2), fillcolor="rgba(59,130,246,0.1)")
+                    fig_line.update_layout(**_CHART_LAYOUT, height=400)
+                    fig_line.update_traces(
+                        line=dict(width=2.5), fillcolor="rgba(59,130,246,0.12)",
+                        hovertemplate='%{x|%d/%m/%Y}<br>$%{y:,.0f} CLP<extra></extra>',
+                    )
+                    fig_line.update_yaxes(tickformat='~s', title_text='')
+                    fig_line.update_xaxes(tickformat='%d/%m/%y', title_text='')
                     st.plotly_chart(fig_line, use_container_width=True)
                 else:
                     st.info("No hay fechas válidas.")

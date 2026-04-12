@@ -128,10 +128,13 @@ def increment_rate_limit_usage(ip: str, fecha: str) -> None:
 
 
 def format_clp(value: float) -> str:
-    """Formato corto de montos CLP (ej. $5.9B CLP)."""
-    if value >= 1_000_000_000:
-        return f"${value / 1_000_000_000:,.1f}B CLP"
-    elif value >= 1_000_000:
+    """Formato corto de montos CLP (ej. $175.4 Mil M CLP)."""
+    abs_val = abs(value)
+    if abs_val >= 1_000_000_000_000:
+        return f"${value / 1_000_000_000_000:,.1f}B CLP"
+    elif abs_val >= 1_000_000_000:
+        return f"${value / 1_000_000_000:,.1f} Mil M CLP"
+    elif abs_val >= 1_000_000:
         return f"${value / 1_000_000:,.0f}M CLP"
     else:
         return f"${value:,.0f} CLP".replace(",", ".")

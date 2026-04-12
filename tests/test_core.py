@@ -443,7 +443,15 @@ class TestQueries:
 
     def test_format_clp_billions(self):
         from queries import format_clp
-        assert "B CLP" in format_clp(5_900_000_000)
+        result = format_clp(5_900_000_000)
+        assert "Mil M CLP" in result
+        assert "5.9" in result
+
+    def test_format_clp_trillions(self):
+        from queries import format_clp
+        result = format_clp(1_500_000_000_000)
+        assert "B CLP" in result
+        assert "1.5" in result
 
     def test_format_clp_millions(self):
         from queries import format_clp

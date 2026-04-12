@@ -548,9 +548,9 @@ def _render_tab_general(df_filtrado, total_gasto, total_oc, total_proveedores, t
     # Fila 3: Alertas rápidas
     st.markdown("#### Órdenes de compra de mayor monto")
     if not df_filtrado.empty:
-        top5 = df_filtrado.nlargest(5, 'monto_total_item')[['codigo_oc', 'nombre_proveedor', 'nombre_comprador', 'monto_total_item', 'tipo_oc']].copy()
+        top5 = df_filtrado.nlargest(5, 'monto_total_item')[['codigo_oc', 'nombre_proveedor', 'rut_proveedor', 'nombre_comprador', 'monto_total_item', 'tipo_oc']].copy()
         top5['monto_total_item'] = top5['monto_total_item'].apply(format_clp)
-        top5.columns = ['Código OC', 'Proveedor', 'Organismo', 'Monto', 'Tipo']
+        top5.columns = ['Código OC', 'Proveedor', 'RUT Proveedor', 'Organismo', 'Monto', 'Tipo']
         st.dataframe(top5, hide_index=True, use_container_width=True)
 
     # ══════════════════════════════════════════════════════════════════════════
@@ -881,7 +881,8 @@ def _render_tab_datos(df_filtrado, filtro_global):
         if not df_filtrado.empty:
             mostrar_col = [
                 'codigo_oc', 'categoria_riesgo', 'nombre_comprador',
-                'nombre_proveedor', 'nombre_producto', 'cantidad',
+                'rut_comprador', 'nombre_proveedor', 'rut_proveedor',
+                'nombre_producto', 'cantidad',
                 'precio_unitario', 'monto_total_item', 'fecha_creacion'
             ]
             dt_display = df_filtrado[mostrar_col].copy()
@@ -905,7 +906,9 @@ def _render_tab_datos(df_filtrado, filtro_global):
                     "codigo_oc": st.column_config.TextColumn("Código OC"),
                     "categoria_riesgo": st.column_config.TextColumn("Nivel Riesgo"),
                     "nombre_comprador": st.column_config.TextColumn("Entidad de Gobierno"),
+                    "rut_comprador": st.column_config.TextColumn("RUT Comprador"),
                     "nombre_proveedor": st.column_config.TextColumn("Proveedor / Empresa"),
+                    "rut_proveedor": st.column_config.TextColumn("RUT Proveedor"),
                     "nombre_producto": st.column_config.TextColumn("Ítem Adquirido", width="medium"),
                     "cantidad": st.column_config.NumberColumn("Ud.", format="%d"),
                     "precio_unitario": st.column_config.NumberColumn("Precio Ud.", format="$%d"),

@@ -1585,6 +1585,18 @@ def main():
 
 
     # ─────────────────────────────────────────────────────────────────────────
+    # MÉTRICAS GLOBALES (usadas por múltiples tabs + share footer)
+    # ─────────────────────────────────────────────────────────────────────────
+    total_gasto = df_filtrado['monto_total_item'].sum() if not df_filtrado.empty else 0
+    total_oc = df_filtrado['codigo_oc'].nunique() if not df_filtrado.empty else 0
+    total_proveedores = df_filtrado['nombre_proveedor'].nunique() if not df_filtrado.empty else 0
+    total_compradores = df_filtrado['nombre_comprador'].nunique() if not df_filtrado.empty else 0
+    n_trato_directo = 0
+    if not df_filtrado.empty:
+        n_trato_directo = df_filtrado[df_filtrado['tipo_oc'].isin(OC_TIPO_TRATO_DIRECTO)]['codigo_oc'].nunique()
+    pct_td = (n_trato_directo / total_oc * 100) if total_oc > 0 else 0
+
+    # ─────────────────────────────────────────────────────────────────────────
     # ENRUTAMIENTO POR PESTAÑAS (Limpieza Visual)
     # ─────────────────────────────────────────────────────────────────────────
     tab_estadisticas, tab_cruce, tab_registro, tab_medios, tab_mira, tab_analistas, tab_ia = st.tabs([

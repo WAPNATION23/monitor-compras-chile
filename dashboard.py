@@ -1274,7 +1274,7 @@ def _render_tab_denuncias(df_filtrado):
 
 
 
-def _render_tab_ia(df_filtrado):
+def _render_tab_ia(df_filtrado, prompt=None):
     st.markdown(
         '<div class="section-header">'
         '<div class="icon blue">�</div>'
@@ -1379,9 +1379,9 @@ def _render_tab_ia(df_filtrado):
     remaining = max(0, daily_limit - daily_used)
     st.caption(f"🔋 Consultas restantes hoy: **{remaining}**/{daily_limit}")
 
-    # Capturar prompt desde chip o input
+    # Capturar prompt desde chip o desde parámetro (chat_input vive en main)
     pending = st.session_state.pop("_pending_query", None)
-    prompt = pending or st.chat_input("¿Qué quieres investigar? (persona, empresa, organismo, anomalías...)")
+    prompt = pending or prompt
 
     if prompt:
         if remaining <= 0:
@@ -1629,8 +1629,11 @@ def main():
     with tab_analistas:
         _render_tab_denuncias(df_filtrado)
 
+    # chat_input DEBE vivir fuera de tabs (restricción de Streamlit)
+    ia_prompt = st.chat_input("¿Qué quieres investigar? (persona, empresa, organismo, anomalías...)")
+
     with tab_ia:
-        _render_tab_ia(df_filtrado)
+        _render_tab_ia(df_filtrado, prompt=ia_prompt)
 
     # ─────────────────────────────────────────────────────────────────────────
     # COMPARTIR EN REDES SOCIALES

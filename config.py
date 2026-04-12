@@ -105,7 +105,7 @@ RISK_CLASSIFICATION: dict[str, list[str]] = {
 
 # ──────────── Códigos de tipo de OC (para filtros avanzados) ──────────────── #
 # Ref: https://api.mercadopublico.cl/ → Documentación de orden de compra
-OC_TIPO_TRATO_DIRECTO: list[str] = ["D1", "C1", "F3", "G1", "FG"]
+OC_TIPO_TRATO_DIRECTO: list[str] = ["D1", "C1", "F3", "G1", "FG", "TD", "SE"]
 OC_TIPO_CONVENIO_MARCO: list[str] = ["CM"]
 OC_TIPO_COMPRA_AGIL: list[str] = ["AG", "MC", "R1"]
 

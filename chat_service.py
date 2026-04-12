@@ -1,6 +1,11 @@
 """
-Servicio del asistente IA (DeepSeek) con inteligencia local.
-Separado de dashboard.py para aislar la lógica de IA del UI.
+Servicio del asistente IA (DeepSeek) con inteligencia forense.
+
+Pipeline:
+  1. Clasifica la intención del usuario (persona, proveedor, organismo, anomalía, general)
+  2. Ejecuta herramientas forenses en paralelo según la intención
+  3. Inyecta el contexto enriquecido al LLM
+  4. Retorna respuesta con evidencia citada
 """
 
 import logging
@@ -9,6 +14,7 @@ import re
 import sqlite3
 from datetime import datetime
 
+import pandas as pd
 import requests
 from dotenv import load_dotenv
 
@@ -28,6 +34,224 @@ _STOPWORDS = frozenset({
     "investigar", "investiga", "buscar", "arma", "expediente", "dime", "quien",
     "quienes", "cuales", "caso", "crear", "procede", "claro",
 })
+
+# ──────────────────────────────────────────────────────────────────────────
+# INTENT CLASSIFIER
+# ──────────────────────────────────────────────────────────────────────────
+_RUT_PATTERN = re.compile(r"\d{1,2}\.?\d{3}\.?\d{3}-[\dkK]")
+
+_INTENT_KEYWORDS = {
+    "persona": [
+        "persona", "político", "politico", "diputado", "senador", "alcalde",
+        "funcionario", "ministro", "servel", "lobby", "probidad", "declaración",
+    ],
+    "proveedor": [
+        "proveedor", "empresa", "rut", "sociedad", "fundación", "fundacion",
+        "ong", "corporación", "corporacion", "contratista", "adjudicatario",
+    ],
+    "organismo": [
+        "organismo", "ministerio", "servicio", "municipalidad", "gore",
+        "hospital", "universidad", "comprador", "institución", "institucion",
+    ],
+    "anomalia": [
+        "anomalía", "anomalia", "sospechoso", "fraude", "fraccionamiento",
+        "vampiro", "fantasma", "sobreprecio", "irregularidad", "riesgo",
+        "alerta", "concentración", "concentracion", "trato directo",
+    ],
+    "resumen": [
+        "resumen", "dashboard", "general", "estadísticas", "estadisticas",
+        "reporte", "ejecutivo", "panorama", "estado",
+    ],
+}
+
+
+def classify_intent(prompt: str) -> list[str]:
+    """Clasifica la intención del usuario. Retorna lista de intenciones."""
+    lower = prompt.lower()
+    intents = []
+    if _RUT_PATTERN.search(prompt):
+        intents.append("proveedor")
+    for intent, keywords in _INTENT_KEYWORDS.items():
+        if any(kw in lower for kw in keywords):
+            intents.append(intent)
+    return intents or ["general"]
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# FORENSIC TOOLS — cada una retorna (label, context_str)
+# ──────────────────────────────────────────────────────────────────────────
+
+def _tool_person_search(prompt: str) -> tuple[str, str]:
+    """Busca persona en las 7 fuentes oficiales vía AlertasPersonas."""
+    try:
+        from alertas_personas import AlertasPersonas
+        ap = AlertasPersonas(DB_PATH)
+        resultados = ap.buscar(prompt)
+        if not resultados:
+            return "Búsqueda de Persona", f"Sin resultados en 7 fuentes oficiales para: {prompt}"
+        lines = [f"### BÚSQUEDA DE PERSONA — {len(resultados)} hallazgos ###"]
+        for r in resultados[:20]:
+            lines.append(
+                f"- [{r.get('tipo', '?')}] {r.get('fecha', '?')} | "
+                f"{r.get('descripcion', 'N/A')} | Fuente: {r.get('fuente', '?')}"
+            )
+        return "Búsqueda de Persona (7 fuentes)", "\n".join(lines)
+    except Exception as exc:
+        logger.warning("Error en búsqueda de persona: %s", exc)
+        return "Búsqueda de Persona", f"[Error: {exc}]"
+
+
+def _tool_anomaly_scan(prompt: str) -> tuple[str, str]:
+    """Ejecuta detector de anomalías y cruza con personas."""
+    try:
+        from cross_referencer import CrossReferencer
+        xref = CrossReferencer(DB_PATH)
+
+        lines = ["### ANÁLISIS FORENSE DE ANOMALÍAS ###"]
+
+        # Top proveedores sospechosos
+        df_susp = xref.ranking_proveedores_sospechosos(top_n=10)
+        if not df_susp.empty:
+            lines.append("\n**TOP 10 PROVEEDORES SOSPECHOSOS (Score Compuesto):**")
+            for _, row in df_susp.head(10).iterrows():
+                lines.append(
+                    f"- {row.get('nombre_proveedor', '?')} (RUT: {row.get('rut_proveedor', '?')}) | "
+                    f"Score: {row.get('score_riesgo', 0):.1f} | "
+                    f"Monto: ${row.get('monto_total', 0):,.0f} CLP"
+                )
+
+        # Organismos de mayor riesgo
+        df_org = xref.ranking_riesgo_organismos()
+        if not df_org.empty:
+            lines.append("\n**TOP 5 ORGANISMOS DE MAYOR RIESGO:**")
+            for _, row in df_org.head(5).iterrows():
+                lines.append(
+                    f"- {row.get('nombre_comprador', '?')} | "
+                    f"Score: {row.get('score_riesgo', 0):.1f} | "
+                    f"% Trato Directo: {row.get('pct_trato_directo', 0):.0f}%"
+                )
+
+        # Abuso de trato directo
+        df_td = xref.ratio_tratos_directos()
+        if not df_td.empty:
+            top_td = df_td[df_td["ratio_td"] > 0.8].head(5)
+            if not top_td.empty:
+                lines.append("\n**ORGANISMOS CON >80% TRATO DIRECTO:**")
+                for _, row in top_td.iterrows():
+                    lines.append(
+                        f"- {row.get('nombre_comprador', '?')} | "
+                        f"Ratio TD: {row.get('ratio_td', 0):.0%} | "
+                        f"N={row.get('n_trato_directo', 0)}/{row.get('n_total', 0)}"
+                    )
+
+        return "Scanner Forense", "\n".join(lines)
+    except Exception as exc:
+        logger.warning("Error en anomaly scan: %s", exc)
+        return "Scanner Forense", f"[Error: {exc}]"
+
+
+def _tool_cross_servel(prompt: str) -> tuple[str, str]:
+    """Cruza aportes SERVEL vs. adjudicaciones."""
+    try:
+        from cross_referencer import CrossReferencer
+        xref = CrossReferencer(DB_PATH)
+        df = xref.cruce_servel_compras()
+        if df.empty:
+            return "Cruce SERVEL", "Sin datos SERVEL cargados o sin coincidencias detectadas."
+        lines = ["### CRUCE SERVEL — Aportes electorales vs. Adjudicaciones ###"]
+        for _, row in df.head(10).iterrows():
+            lines.append(
+                f"- Aportante: {row.get('nombre_aportante', '?')} → "
+                f"Partido/Candidato: {row.get('politico_o_partido', '?')} | "
+                f"Inversión electoral: ${row.get('inversion_electoral', 0):,.0f} | "
+                f"Retorno por licitaciones: ${row.get('retorno_licitaciones', 0):,.0f}"
+            )
+        return "Cruce SERVEL", "\n".join(lines)
+    except Exception as exc:
+        logger.warning("Error en cruce SERVEL: %s", exc)
+        return "Cruce SERVEL", f"[Error: {exc}]"
+
+
+def _tool_executive_report() -> tuple[str, str]:
+    """Genera reporte ejecutivo de la base de datos."""
+    try:
+        from cross_referencer import CrossReferencer
+        xref = CrossReferencer(DB_PATH)
+        report = xref.reporte_ejecutivo()
+        if not report:
+            return "Reporte Ejecutivo", "Base de datos vacía."
+        lines = ["### REPORTE EJECUTIVO ###"]
+        for key, val in report.items():
+            if isinstance(val, float):
+                lines.append(f"- {key}: ${val:,.0f}" if val > 1000 else f"- {key}: {val:.2f}")
+            else:
+                lines.append(f"- {key}: {val}")
+        return "Reporte Ejecutivo", "\n".join(lines)
+    except Exception as exc:
+        logger.warning("Error en reporte ejecutivo: %s", exc)
+        return "Reporte Ejecutivo", f"[Error: {exc}]"
+
+
+def _tool_fiscalizaciones_cgr(prompt: str) -> tuple[str, str]:
+    """Busca organismos bajo fiscalización de la Contraloría."""
+    try:
+        from contraloria_connector import ContraloriaConnector
+        cgr = ContraloriaConnector(DB_PATH)
+        df = cgr.cruzar_compradores_fiscalizados()
+        if df.empty:
+            return "Contraloría CGR", "Sin datos de fiscalizaciones cargados."
+        # Filtrar por keywords si hay
+        keywords = _extract_keywords(prompt)
+        if keywords:
+            mask = pd.Series(False, index=df.index)
+            for kw in keywords:
+                for col in ["nombre_comprador", "entidad_fiscalizada"]:
+                    if col in df.columns:
+                        mask |= df[col].str.lower().str.contains(kw, na=False)
+            if mask.any():
+                df = df[mask]
+        lines = [f"### FISCALIZACIONES CGR — {len(df)} coincidencias ###"]
+        for _, row in df.head(10).iterrows():
+            lines.append(
+                f"- {row.get('nombre_comprador', '?')} | "
+                f"Fiscalizada: {row.get('entidad_fiscalizada', '?')} | "
+                f"Gasto: ${row.get('gasto_total', 0):,.0f} CLP"
+            )
+        return "Contraloría CGR", "\n".join(lines)
+    except ImportError:
+        return "Contraloría CGR", "[Conector no disponible]"
+    except Exception as exc:
+        logger.warning("Error en CGR: %s", exc)
+        return "Contraloría CGR", f"[Error: {exc}]"
+
+
+def _tool_infoprobidad(prompt: str) -> tuple[str, str]:
+    """Busca conflictos de interés en InfoProbidad."""
+    try:
+        from infoprobidad_connector import InfoProbidadConnector
+        from cross_referencer import CrossReferencer
+        ip = InfoProbidadConnector(DB_PATH)
+        xref = CrossReferencer(DB_PATH)
+        df_susp = xref.ranking_proveedores_sospechosos(top_n=5)
+        if df_susp.empty:
+            return "InfoProbidad", "Sin proveedores para cruzar."
+        nombres = df_susp["nombre_proveedor"].tolist()
+        df_conflictos = ip.cruzar_intereses_proveedores(nombres)
+        if df_conflictos.empty:
+            return "InfoProbidad", "Sin conflictos de interés detectados en top proveedores."
+        lines = [f"### INFOPROBIDAD — {len(df_conflictos)} conflictos potenciales ###"]
+        for _, row in df_conflictos.head(10).iterrows():
+            lines.append(
+                f"- Funcionario: {row.get('nombre_funcionario', '?')} | "
+                f"Cargo: {row.get('cargo', '?')} | "
+                f"Proveedor: {row.get('proveedor_match', '?')}"
+            )
+        return "InfoProbidad", "\n".join(lines)
+    except ImportError:
+        return "InfoProbidad", "[Conector no disponible]"
+    except Exception as exc:
+        logger.warning("Error en InfoProbidad: %s", exc)
+        return "InfoProbidad", f"[Error: {exc}]"
 
 
 def _extract_keywords(text: str) -> list[str]:
@@ -143,43 +367,110 @@ def build_web_context(prompt: str) -> str:
         return "[No se pudo acceder a búsqueda web. Usando solo memoria interna.]"
 
 
-def build_system_prompt(web_context: str, db_context: str) -> str:
-    """Construye el system prompt para DeepSeek."""
+# ──────────────────────────────────────────────────────────────────────────
+# ORCHESTRATOR — selecciona y ejecuta herramientas según intención
+# ──────────────────────────────────────────────────────────────────────────
+
+# Mapa de intención → herramientas a ejecutar
+_INTENT_TOOL_MAP: dict[str, list] = {
+    "persona":  [_tool_person_search, _tool_cross_servel],
+    "proveedor": [_tool_anomaly_scan, _tool_fiscalizaciones_cgr],
+    "organismo": [_tool_anomaly_scan, _tool_fiscalizaciones_cgr, _tool_infoprobidad],
+    "anomalia":  [_tool_anomaly_scan, _tool_cross_servel, _tool_infoprobidad],
+    "resumen":   [_tool_executive_report],
+    "general":   [_tool_executive_report],
+}
+
+
+def build_forensic_context(prompt: str) -> tuple[str, list[str]]:
+    """
+    Orquesta la ejecución de herramientas forenses según la intención.
+    Retorna (contexto_forense, herramientas_usadas).
+    """
+    intents = classify_intent(prompt)
+    tools_to_run = []
+    seen = set()
+    for intent in intents:
+        for tool_fn in _INTENT_TOOL_MAP.get(intent, []):
+            fn_name = tool_fn.__name__
+            if fn_name not in seen:
+                seen.add(fn_name)
+                tools_to_run.append(tool_fn)
+
+    if not tools_to_run:
+        tools_to_run = [_tool_executive_report]
+
+    results = []
+    tools_used = []
+    for tool_fn in tools_to_run:
+        try:
+            # _tool_executive_report no toma prompt
+            if tool_fn is _tool_executive_report:
+                label, ctx = tool_fn()
+            else:
+                label, ctx = tool_fn(prompt)
+            tools_used.append(label)
+            results.append(f"\n{ctx}")
+        except Exception as exc:
+            logger.warning("Error en herramienta %s: %s", tool_fn.__name__, exc)
+
+    context = "\n".join(results)
+    return context, tools_used
+
+
+def build_system_prompt(web_context: str, db_context: str,
+                        forensic_context: str = "") -> str:
+    """Construye el system prompt para DeepSeek con inteligencia forense."""
     fecha_actual = datetime.now().strftime("%Y-%m-%d")
     return (
-        "Eres el 'Cerebro Forense' de una plataforma anticorrupción llamada 'Ojo del Pueblo'. "
-        "Tu objetivo es analizar datos financieros y políticos con rigor. Tu tono es directo, profesional y basado en evidencia (estilo analista OSINT). "
-        f"MUY IMPORTANTE: Hoy es {fecha_actual}. Tu base de memoria puede estar desactualizada, "
-        "por lo que dependes del Contexto Web para información política vigente. "
-        "Si no sabes algo con certeza, dilo explícitamente.\n"
-        "\n### Contexto Web Extraído de Internet AHORA MISMO: ###\n"
-        f"{web_context}\n"
+        "Eres el 'Cerebro Forense' de la plataforma anticorrupción 'Ojo del Pueblo'. "
+        "Tu misión: analizar datos financieros y políticos con rigor forense. "
+        "Tono: directo, profesional, basado en evidencia (analista OSINT senior).\n"
+        f"Fecha de hoy: {fecha_actual}.\n"
+        "\n══════════════════════════════════════════\n"
+        "██ INTELIGENCIA FORENSE (Herramientas Automáticas) ██\n"
+        "══════════════════════════════════════════\n"
+        f"{forensic_context}\n"
+        "\n══════════════════════════════════════════\n"
+        "██ BASE DE DATOS LOCAL (Órdenes de Compra) ██\n"
+        "══════════════════════════════════════════\n"
         f"{db_context}\n"
-        "##############################################################\n"
-        "DIRECTRICES DE FORMATEO (OBLIGATORIO):\n"
-        "1. Nunca hables como un robot amable, habla como un analista entregando un expediente clasificado.\n"
-        "2. Estructura tu respuesta en este formato Markdown exacto:\n"
-        "   - **PERFIL DE INTERÉS:** (Resumen de quién es, incluye RUT si está disponible en los datos)\n"
-        "   - **HISTORIAL FINANCIERO:** (Qué contratos tiene, montos, fechas, tipo de compra)\n"
-        "   - **ALERTAS DE VÍNCULOS:** (Nexos sospechosos, patrones anómalos)\n"
-        "3. IMPORTANTE: Si tienes datos de la BASE DE DATOS LOCAL o de la API MERCADO PÚBLICO en tu contexto, ÚSALOS como fuente primaria. Esos datos son verificados y reales. Cita los códigos OC, RUTs, montos exactos y fechas.\n"
-        "4. Si NO encuentras datos del objetivo en el contexto inyectado, dilo claramente y sugiere buscar con otro nombre o código OC.\n"
-        "5. [HERRAMIENTA AUTONOMA] Si ya leiste el RUT en el contexto web o el usuario te lo dio (ej. '76.111.222-3'), puedes infiltrarte y descargar su historial de compras AHORA MISMO a tu memoria, añadiendo EXACTAMENTE la cadena secreta al final de tu respuesta: `[EJECUTAR_INFILTRACION: 76.111.222-3]`. Al usarla el panel interceptará tu orden, se auto-reiniciará y en la siguiente vuelta ya sabrás todo."
+        "\n══════════════════════════════════════════\n"
+        "██ CONTEXTO WEB EN TIEMPO REAL ██\n"
+        "══════════════════════════════════════════\n"
+        f"{web_context}\n"
+        "\n##############################################################\n"
+        "DIRECTRICES (OBLIGATORIO):\n"
+        "1. Habla como un analista entregando un expediente clasificado. Cero frases genéricas.\n"
+        "2. Si la INTELIGENCIA FORENSE contiene datos de las 7 fuentes oficiales (SERVEL, InfoLobby, "
+        "Contraloría, InfoProbidad, Mercado Público), ÚSALOS como evidencia primaria.\n"
+        "3. Estructura la respuesta así:\n"
+        "   - **🔎 PERFIL DE INTERÉS:** (Quién es, RUT, cargo, vínculos)\n"
+        "   - **💰 HISTORIAL FINANCIERO:** (Contratos, montos, fechas, tipo de compra, concentración)\n"
+        "   - **🚨 ALERTAS Y ANOMALÍAS:** (Score de riesgo, patrones sospechosos, cruces SERVEL, conflictos de interés)\n"
+        "   - **📋 RECOMENDACIÓN DE INVESTIGACIÓN:** (Qué profundizar, qué fuentes consultar)\n"
+        "4. Cita datos exactos: códigos OC, RUTs, montos, fechas, scores de riesgo.\n"
+        "5. Si NO encuentras datos del objetivo, dilo y sugiere búsquedas alternativas.\n"
+        "6. [HERRAMIENTA AUTÓNOMA — INFILTRACIÓN] Si detectas un RUT (ej. '76.111.222-3'), "
+        "puedes ordenar descargar su historial completo añadiendo al final de tu respuesta: "
+        "`[EJECUTAR_INFILTRACION: 76.111.222-3]`\n"
     )
 
 
-def call_deepseek(messages: list[dict], web_context: str, db_context: str) -> str:
-    """Envía la consulta a DeepSeek con reintentos. Retorna la respuesta o un mensaje de error."""
+def call_deepseek(messages: list[dict], web_context: str, db_context: str,
+                   forensic_context: str = "") -> str:
+    """Envía la consulta a DeepSeek con reintentos. Retorna la respuesta o mensaje de error."""
     api_key = os.getenv("DEEPSEEK_API_KEY", "")
     if not api_key:
-        return "Error: No se encontró DEEPSEEK_API_KEY en el archivo .env. Configura tu clave para activar el asistente."
+        return ("Error: No se encontró DEEPSEEK_API_KEY en el archivo .env. "
+                "Configura tu clave para activar el asistente.")
 
-    system_prompt = build_system_prompt(web_context, db_context)
+    system_prompt = build_system_prompt(web_context, db_context, forensic_context)
 
     payload = {
         "model": "deepseek-chat",
         "messages": [{"role": "system", "content": system_prompt}]
-        + [{"role": m["role"], "content": m["content"]} for m in messages[-5:]],
+        + [{"role": m["role"], "content": m["content"]} for m in messages[-8:]],
         "temperature": 0.4,
     }
 
@@ -207,7 +498,8 @@ def call_deepseek(messages: list[dict], web_context: str, db_context: str) -> st
         except requests.exceptions.Timeout:
             if intento < 2:
                 continue
-            return "El servidor de IA no responde (timeout tras 3 intentos). DeepSeek puede estar saturado. Intenta de nuevo en unos minutos."
+            return ("El servidor de IA no responde (timeout tras 3 intentos). "
+                    "DeepSeek puede estar saturado. Intenta de nuevo en unos minutos.")
         except Exception as e:
             return f"Error de conexión: {str(e)}"
 

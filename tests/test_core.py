@@ -506,6 +506,45 @@ class TestChatService:
         assert "db ctx" in prompt
         assert "Ojo del Pueblo" in prompt
 
+    def test_build_system_prompt_with_forensic(self):
+        from chat_service import build_system_prompt
+        prompt = build_system_prompt("web", "db", "FORENSIC DATA HERE")
+        assert "FORENSIC DATA HERE" in prompt
+        assert "INTELIGENCIA FORENSE" in prompt
+
+    def test_classify_intent_persona(self):
+        from chat_service import classify_intent
+        intents = classify_intent("Buscar al político Juan Pérez")
+        assert "persona" in intents
+
+    def test_classify_intent_proveedor_rut(self):
+        from chat_service import classify_intent
+        intents = classify_intent("Buscar 76.123.456-7")
+        assert "proveedor" in intents
+
+    def test_classify_intent_anomalia(self):
+        from chat_service import classify_intent
+        intents = classify_intent("¿Hay proveedores sospechosos de fraude?")
+        assert "anomalia" in intents
+
+    def test_classify_intent_resumen(self):
+        from chat_service import classify_intent
+        intents = classify_intent("Dame un reporte ejecutivo")
+        assert "resumen" in intents
+
+    def test_classify_intent_general(self):
+        from chat_service import classify_intent
+        intents = classify_intent("hola mundo abc")
+        assert intents == ["general"]
+
+    def test_build_forensic_context_returns_tuple(self, test_db, monkeypatch):
+        import chat_service
+        monkeypatch.setattr(chat_service, "DB_PATH", str(test_db))
+        context, tools = chat_service.build_forensic_context("reporte ejecutivo")
+        assert isinstance(context, str)
+        assert isinstance(tools, list)
+        assert len(tools) > 0
+
     def test_call_deepseek_no_api_key(self, monkeypatch):
         monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
         from chat_service import call_deepseek

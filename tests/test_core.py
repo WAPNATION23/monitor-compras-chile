@@ -63,12 +63,12 @@ class TestProcessor:
             "CodigoEstado": 6,
             "FechaCreacion": "2026-03-15",
             "Comprador": {"RutUnidad": "61.602.000-0", "NombreUnidad": "HOSPITAL TEST"},
-            "Proveedor": {"RutProveedor": "76.111.222-3", "Nombre": "PROVEEDOR TEST"},
+            "Proveedor": {"RutSucursal": "76.111.222-3", "Nombre": "PROVEEDOR TEST"},
             "Items": {
                 "Cantidad": 2,
                 "Listado": [
-                    {"NombreProducto": "PRODUCTO A", "Cantidad": 10, "PrecioNeto": 1000, "Categoria": "Test"},
-                    {"NombreProducto": "PRODUCTO B", "Cantidad": 5, "PrecioNeto": 2000, "Categoria": "Test"},
+                    {"Producto": "PRODUCTO A", "Cantidad": 10, "PrecioNeto": 1000, "Categoria": "Test"},
+                    {"Producto": "PRODUCTO B", "Cantidad": 5, "PrecioNeto": 2000, "Categoria": "Test"},
                 ],
             },
         }
@@ -89,11 +89,11 @@ class TestProcessor:
                 "CodigoEstado": 6,
                 "FechaCreacion": "2026-03-15",
                 "Comprador": {"RutUnidad": "61.602.000-0", "NombreUnidad": "MUNICIPALIDAD DE TEST"},
-                "Proveedor": {"RutProveedor": "76.111.222-3", "Nombre": "PROVEEDOR X"},
+                "Proveedor": {"RutSucursal": "76.111.222-3", "Nombre": "PROVEEDOR X"},
                 "Items": {
                     "Cantidad": 1,
                     "Listado": [
-                        {"NombreProducto": "Papel A4", "Cantidad": 100, "PrecioNeto": 3500, "Categoria": "Oficina"},
+                        {"Producto": "Papel A4", "Cantidad": 100, "PrecioNeto": 3500, "Categoria": "Oficina"},
                     ],
                 },
             },
@@ -175,8 +175,8 @@ class TestProcessor:
                 "CodigoEstado": 9,  # Cancelada
                 "FechaCreacion": "2026-03-15",
                 "Comprador": {"RutUnidad": "61.602.000-0", "NombreUnidad": "TEST"},
-                "Proveedor": {"RutProveedor": "76.111.222-3", "Nombre": "PROV"},
-                "Items": {"Cantidad": 1, "Listado": [{"NombreProducto": "X", "Cantidad": 1, "PrecioNeto": 100, "Categoria": "Y"}]},
+                "Proveedor": {"RutSucursal": "76.111.222-3", "Nombre": "PROV"},
+                "Items": {"Cantidad": 1, "Listado": [{"Producto": "X", "Cantidad": 1, "PrecioNeto": 100, "Categoria": "Y"}]},
             },
         ]
         df, inserted = proc.process_and_store(ordenes)
@@ -215,10 +215,10 @@ class TestInfiltradorIA:
             "CodigoEstado": 6,
             "Fechas": {"FechaCreacion": "2026-01-10"},
             "Comprador": {"RutUnidad": "61.602.000-0", "NombreUnidad": "MUNICIPALIDAD X"},
-            "Proveedor": {"RutProveedor": "76.111.222-3", "Nombre": "PROV TEST"},
+            "Proveedor": {"RutSucursal": "76.111.222-3", "Nombre": "PROV TEST"},
             "Items": {
                 "Cantidad": 1,
-                "Listado": [{"NombreProducto": "Widget", "Cantidad": 5, "PrecioNeto": 1000, "Categoria": "Test"}],
+                "Listado": [{"Producto": "Widget", "Cantidad": 5, "PrecioNeto": 1000, "Categoria": "Test"}],
             },
         }
 
@@ -905,11 +905,11 @@ class TestProcessorRUT:
             "CodigoEstado": 6,
             "FechaCreacion": "2026-03-15",
             "Comprador": {"RutUnidad": "61.602.000-0", "NombreUnidad": "TEST"},
-            "Proveedor": {"RutProveedor": "76.999.888-k", "Nombre": "PROV"},
+            "Proveedor": {"RutSucursal": "76.999.888-k", "Nombre": "PROV"},
             "Items": {
                 "Cantidad": 1,
                 "Listado": [
-                    {"NombreProducto": "X", "Cantidad": 1, "PrecioNeto": 100, "Categoria": "T"},
+                    {"Producto": "X", "Cantidad": 1, "PrecioNeto": 100, "Categoria": "T"},
                 ],
             },
         }
@@ -980,11 +980,11 @@ class TestConcurrentDB:
             "CodigoEstado": 6,
             "FechaCreacion": "2026-03-15",
             "Comprador": {"RutUnidad": "61.602.000-0", "NombreUnidad": "HOSPITAL TEST"},
-            "Proveedor": {"RutProveedor": "76.111.222-3", "Nombre": "PROVEEDOR TEST"},
+            "Proveedor": {"RutSucursal": "76.111.222-3", "Nombre": "PROVEEDOR TEST"},
             "Items": {
                 "Cantidad": 1,
                 "Listado": [
-                    {"NombreProducto": "PRODUCTO A", "Cantidad": 10, "PrecioNeto": 1000, "Categoria": "Test"},
+                    {"Producto": "PRODUCTO A", "Cantidad": 10, "PrecioNeto": 1000, "Categoria": "Test"},
                 ],
             },
         }

@@ -260,7 +260,9 @@ class DataProcessor:
 
         # Proveedor
         proveedor: dict[str, Any] = oc.get("Proveedor", {})
-        rut_proveedor: str = DataProcessor._normalize_rut(proveedor.get("RutProveedor", ""))
+        rut_proveedor: str = DataProcessor._normalize_rut(
+            proveedor.get("RutSucursal", proveedor.get("RutProveedor", ""))
+        )
         nombre_proveedor: str = proveedor.get("Nombre", "")
 
         # Tipo de OC y clasificación de riesgo
@@ -278,7 +280,7 @@ class DataProcessor:
             rows.append(
                 {
                     "codigo_oc": codigo_oc,
-                    "nombre_producto": item.get("NombreProducto", item.get("Descripcion", "")),
+                    "nombre_producto": item.get("Producto", item.get("EspecificacionComprador", "")),
                     "categoria": item.get("Categoria", ""),
                     "cantidad": cantidad,
                     "precio_unitario": precio_unitario,

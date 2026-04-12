@@ -1001,3 +1001,212 @@ class TestConcurrentDB:
         count = conn.execute("SELECT COUNT(*) FROM ordenes_items").fetchone()[0]
         conn.close()
         assert count == 1
+
+
+# ══════════════════════════════════════════════
+# Tests: InfoProbidadConnector
+# ══════════════════════════════════════════════
+
+class TestInfoProbidadConnector:
+    """Tests para el conector de InfoProbidad."""
+
+    def test_init_creates_tables(self, tmp_path):
+        from infoprobidad_connector import InfoProbidadConnector
+        db_path = tmp_path / "test_ip.db"
+        ip = InfoProbidadConnector(db_path=str(db_path))
+        conn = sqlite3.connect(db_path)
+        tables = [r[0] for r in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        ).fetchall()]
+        conn.close()
+        assert "declarantes_probidad" in tables
+        assert "actividades_probidad" in tables
+
+    def test_buscar_declarante_empty_name(self, tmp_path):
+        from infoprobidad_connector import InfoProbidadConnector
+        ip = InfoProbidadConnector(db_path=str(tmp_path / "test.db"))
+        assert ip.buscar_declarante("") == []
+        assert ip.buscar_declarante("   ") == []
+
+    def test_buscar_declarante_sanitizes_input(self, tmp_path):
+        from infoprobidad_connector import InfoProbidadConnector
+        ip = InfoProbidadConnector(db_path=str(tmp_path / "test.db"))
+        # Should not raise even with special characters
+        result = ip.buscar_declarante('<script>alert("xss")</script>')
+        assert isinstance(result, list)
+
+    def test_guardar_declarantes(self, tmp_path):
+        from infoprobidad_connector import InfoProbidadConnector
+        db_path = tmp_path / "test_ip.db"
+        ip = InfoProbidadConnector(db_path=str(db_path))
+
+        declarantes = [
+            {
+                "nombre": "Juan Pérez",
+                "cargo": "Director",
+                "institucion": "MINSAL",
+                "fecha_declaracion": "2025-01-15",
+                "tipo_declaracion": "ASUNCION",
+            },
+        ]
+        count = ip.guardar_declarantes(declarantes)
+        assert count == 1
+
+        # Verify in DB
+        conn = sqlite3.connect(db_path)
+        rows = conn.execute("SELECT * FROM declarantes_probidad").fetchall()
+        conn.close()
+        assert len(rows) == 1
+
+    def test_guardar_declarantes_empty(self, tmp_path):
+        from infoprobidad_connector import InfoProbidadConnector
+        ip = InfoProbidadConnector(db_path=str(tmp_path / "test.db"))
+        assert ip.guardar_declarantes([]) == 0
+
+    def test_guardar_actividades(self, tmp_path):
+        from infoprobidad_connector import InfoProbidadConnector
+        db_path = tmp_path / "test_ip.db"
+        ip = InfoProbidadConnector(db_path=str(db_path))
+
+        actividades = [
+            {
+                "nombre": "María González",
+                "cargo": "Subsecretaria",
+                "institucion": "MOP",
+                "actividad": "Directora de ACME Limitada",
+                "tipo_actividad": "PARTICIPACION_SOCIEDAD",
+            },
+        ]
+        count = ip.guardar_actividades(actividades)
+        assert count == 1
+
+    def test_cruzar_con_proveedor_short_name(self, tmp_path):
+        from infoprobidad_connector import InfoProbidadConnector
+        ip = InfoProbidadConnector(db_path=str(tmp_path / "test.db"))
+        # Names shorter than 3 chars should return empty
+        assert ip.cruzar_con_proveedor("AB") == []
+
+
+# ══════════════════════════════════════════════
+# Tests: ContraloriaConnector
+# ══════════════════════════════════════════════
+
+class TestContraloriaConnector:
+    """Tests para el conector de Contraloría."""
+
+    def test_init_creates_tables(self, tmp_path):
+        from contraloria_connector import ContraloriaConnector
+        db_path = tmp_path / "test_cgr.db"
+        cgr = ContraloriaConnector(db_path=str(db_path))
+        conn = sqlite3.connect(db_path)
+        tables = [r[0] for r in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        ).fetchall()]
+        conn.close()
+        assert "fiscalizaciones_cgr" in tables
+        assert "informes_cgr" in tables
+
+    def test_guardar_fiscalizaciones(self, tmp_path):
+        from contraloria_connector import ContraloriaConnector
+        db_path = tmp_path / "test_cgr.db"
+        cgr = ContraloriaConnector(db_path=str(db_path))
+
+        fisc = [
+            {
+                "region": "RM",
+                "sector": "SALUD",
+                "entidad": "HOSPITAL SAN JUAN DE DIOS",
+                "periodo": "2026",
+                "tipo_fiscalizacion": "AUDITORIA",
+                "materia": "ADMINISTRACIÓN DE RECURSOS",
+            },
+        ]
+        count = cgr.guardar_fiscalizaciones(fisc)
+        assert count == 1
+
+    def test_guardar_fiscalizaciones_empty(self, tmp_path):
+        from contraloria_connector import ContraloriaConnector
+        cgr = ContraloriaConnector(db_path=str(tmp_path / "test.db"))
+        assert cgr.guardar_fiscalizaciones([]) == 0
+
+    def test_guardar_informes(self, tmp_path):
+        from contraloria_connector import ContraloriaConnector
+        db_path = tmp_path / "test_cgr.db"
+        cgr = ContraloriaConnector(db_path=str(db_path))
+
+        informes = [
+            {
+                "fecha": "2026-02-13",
+                "entidad": "FUNDACION INTEGRA",
+                "titulo": "Informe Final De Investigación Especial N° 732",
+                "url_informe": "https://example.com/informe.pdf",
+            },
+        ]
+        count = cgr.guardar_informes(informes)
+        assert count == 1
+
+    def test_buscar_fiscalizacion_entidad_empty(self, tmp_path):
+        from contraloria_connector import ContraloriaConnector
+        cgr = ContraloriaConnector(db_path=str(tmp_path / "test.db"))
+        assert cgr.buscar_fiscalizacion_entidad("") == []
+
+    def test_cruzar_compradores_fiscalizados(self, test_db):
+        from contraloria_connector import ContraloriaConnector
+        cgr = ContraloriaConnector(db_path=str(test_db))
+
+        # Guardar fiscalización que matchee un comprador del test_db
+        fisc = [
+            {
+                "region": "RM",
+                "sector": "SALUD",
+                "entidad": "HOSPITAL SAN JUAN DE DIOS",
+                "periodo": "2026",
+                "tipo_fiscalizacion": "AUDITORIA",
+                "materia": "ADQUISICIONES",
+            },
+        ]
+        cgr.guardar_fiscalizaciones(fisc)
+        result = cgr.cruzar_compradores_fiscalizados()
+        assert not result.empty
+        assert "HOSPITAL SAN JUAN DE DIOS" in result["nombre_comprador"].values
+
+    def test_entidad_bajo_fiscalizacion_local(self, tmp_path):
+        from contraloria_connector import ContraloriaConnector
+        db_path = tmp_path / "test_cgr.db"
+        cgr = ContraloriaConnector(db_path=str(db_path))
+        cgr.guardar_fiscalizaciones([{
+            "region": "V",
+            "sector": "EDUCACION",
+            "entidad": "UNIVERSIDAD TECNICA",
+            "periodo": "2026",
+            "tipo_fiscalizacion": "DENUNCIA",
+            "materia": "CONTRATACIONES",
+        }])
+        assert cgr.entidad_bajo_fiscalizacion("UNIVERSIDAD")
+
+
+# ══════════════════════════════════════════════
+# Tests: DipresConnector
+# ══════════════════════════════════════════════
+
+class TestDipresConnector:
+    """Tests para el conector de DIPRES."""
+
+    def test_init_creates_tables(self, tmp_path):
+        from dipres_connector import DipresConnector
+        db_path = tmp_path / "test_dipres.db"
+        dp = DipresConnector(db_path=str(db_path))
+        conn = sqlite3.connect(db_path)
+        tables = [r[0] for r in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        ).fetchall()]
+        conn.close()
+        assert "presupuesto_dipres" in tables
+        assert "dotacion_dipres" in tables
+
+    def test_cruzar_presupuesto_compras_no_data(self, test_db):
+        from dipres_connector import DipresConnector
+        dp = DipresConnector(db_path=str(test_db))
+        result = dp.cruzar_presupuesto_compras()
+        # Should return compras data even without DIPRES data
+        assert isinstance(result, pd.DataFrame)

@@ -10,11 +10,14 @@ Fuentes verificadas y operativas:
   3. Contraloría (buscador)   — Dictámenes y resoluciones (scraping controlado)
   4. Mercado Público (API)    — Órdenes de compra asociadas a un proveedor
   5. SERVEL (DB local)        — Aportes electorales
+  6. InfoProbidad (SPARQL)    — Declaraciones de patrimonio e intereses
+  7. Contraloría (SICA)       — Fiscalizaciones en curso
 
 Cada alerta devuelta tiene:
   - fuente: nombre oficial del organismo
   - fecha: fecha del registro (ISO 8601 o "sin fecha")
-  - tipo_alerta: categoría (LOBBY, SANCIÓN, DICTAMEN, COMPRA_PUBLICA, APORTE_ELECTORAL)
+  - tipo_alerta: categoría (LOBBY, SANCIÓN, DICTAMEN, COMPRA_PUBLICA,
+                             APORTE_ELECTORAL, DECLARACION_PROBIDAD, FISCALIZACION)
   - descripcion: resumen legible del hallazgo
   - url: enlace directo al registro público (cuando existe)
 
@@ -133,6 +136,12 @@ class AlertasPersonas:
         # 5. Mercado Público (opcional, requiere RUT)
         if incluir_compras:
             alertas.extend(self._buscar_mercado_publico_por_nombre(nombre))
+
+        # 6. InfoProbidad — Declaraciones de patrimonio e intereses
+        alertas.extend(self._buscar_infoprobidad(nombre))
+
+        # 7. Contraloría — Fiscalizaciones en curso
+        alertas.extend(self._buscar_fiscalizaciones_cgr(nombre))
 
         # Ordenar por fecha descendente
         alertas.sort(key=lambda a: a.fecha if a.fecha != "sin fecha" else "", reverse=True)
@@ -531,6 +540,109 @@ class AlertasPersonas:
 
         except (sqlite3.Error, pd.errors.DatabaseError) as exc:
             logger.error("Error consultando Mercado Público en DB local: %s", exc)
+
+        return alertas
+
+    # ═══════════════════════════════════════════════════════════
+    # FUENTE 6: InfoProbidad — Declaraciones de patrimonio e intereses
+    # ═══════════════════════════════════════════════════════════
+
+    def _buscar_infoprobidad(self, nombre: str) -> list[Alerta]:
+        """
+        Busca declaraciones de patrimonio e intereses del funcionario
+        en InfoProbidad.cl vía SPARQL (datos.cplt.cl/sparql).
+        """
+        alertas: list[Alerta] = []
+
+        try:
+            from infoprobidad_connector import InfoProbidadConnector
+            ip = InfoProbidadConnector(self.db_path)
+
+            # Buscar declaraciones
+            declaraciones = ip.buscar_declarante(nombre, limit=20)
+            for d in declaraciones:
+                alertas.append(Alerta(
+                    fuente="InfoProbidad — Ley de Probidad (Ley 20.880)",
+                    fecha=d.get("fecha_declaracion", "sin fecha"),
+                    tipo_alerta="DECLARACION_PROBIDAD",
+                    descripcion=(
+                        f"Declaración de {d.get('nombre', 'N/D')}. "
+                        f"Cargo: {d.get('cargo', 'N/D')}. "
+                        f"Institución: {d.get('institucion', 'N/D')}. "
+                        f"Tipo: {d.get('tipo_declaracion', 'N/D')}."
+                    ),
+                    url="https://www.infoprobidad.cl/Home/Listado",
+                ))
+
+            # Buscar actividades económicas (sociedades, directorios)
+            actividades = ip.buscar_actividades(nombre, limit=20)
+            for a in actividades:
+                alertas.append(Alerta(
+                    fuente="InfoProbidad — Actividades Económicas",
+                    fecha=datetime.now().strftime("%Y-%m-%d"),
+                    tipo_alerta="ACTIVIDAD_PROBIDAD",
+                    descripcion=(
+                        f"Actividad declarada por {a.get('nombre', 'N/D')} "
+                        f"({a.get('cargo', 'N/D')}, {a.get('institucion', 'N/D')}): "
+                        f"{a.get('actividad', 'N/D')} "
+                        f"(tipo: {a.get('tipo_actividad', 'N/D')})."
+                    ),
+                    url="https://www.infoprobidad.cl/Home/Listado",
+                ))
+
+            logger.info(
+                "InfoProbidad: %d declaraciones + %d actividades para '%s'.",
+                len(declaraciones), len(actividades), nombre,
+            )
+
+        except ImportError:
+            logger.warning("infoprobidad_connector no disponible.")
+        except Exception as exc:
+            logger.error("Error consultando InfoProbidad: %s", exc)
+
+        return alertas
+
+    # ═══════════════════════════════════════════════════════════
+    # FUENTE 7: Contraloría — Fiscalizaciones en curso
+    # ═══════════════════════════════════════════════════════════
+
+    def _buscar_fiscalizaciones_cgr(self, nombre: str) -> list[Alerta]:
+        """
+        Busca si hay fiscalizaciones de la CGR relacionadas con la persona
+        (por nombre de entidad donde trabaja o entidad mencionada).
+        """
+        alertas: list[Alerta] = []
+
+        try:
+            from contraloria_connector import ContraloriaConnector
+            cgr = ContraloriaConnector(self.db_path)
+
+            # Buscar fiscalizaciones que mencionen al nombre
+            fisc = cgr.buscar_fiscalizacion_entidad(nombre)
+            for f in fisc[:10]:
+                alertas.append(Alerta(
+                    fuente="Contraloría General de la República — SICA",
+                    fecha=f.get("periodo", "sin fecha"),
+                    tipo_alerta="FISCALIZACION",
+                    descripcion=(
+                        f"Fiscalización en curso: {f.get('entidad', 'N/D')}. "
+                        f"Región: {f.get('region', 'N/D')}. "
+                        f"Tipo: {f.get('tipo_fiscalizacion', 'N/D')}. "
+                        f"Materia: {f.get('materia', 'N/D')}."
+                    ),
+                    url="https://www.contraloria.cl/web/cgr/fiscalizaciones-en-curso",
+                ))
+
+            if fisc:
+                logger.info(
+                    "CGR: %d fiscalizaciones encontradas para '%s'.",
+                    len(fisc), nombre,
+                )
+
+        except ImportError:
+            logger.warning("contraloria_connector no disponible.")
+        except Exception as exc:
+            logger.error("Error consultando fiscalizaciones CGR: %s", exc)
 
         return alertas
 

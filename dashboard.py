@@ -736,6 +736,102 @@ def main():
                     logger.warning("Error en cruce anomalías→personas: %s", exc)
                     st.info("Cruce anomalías→personas no disponible. El detector puede tardar con datasets grandes.")
 
+            # ── Cruce: Compradores bajo Fiscalización CGR ──
+            st.markdown("### 🔎 Compradores bajo Fiscalización CGR")
+            st.caption("Organismos compradores que están actualmente bajo fiscalización de la Contraloría.")
+            try:
+                from contraloria_connector import ContraloriaConnector
+                cgr = ContraloriaConnector(DB_PATH)
+                df_fisc = cgr.cruzar_compradores_fiscalizados()
+                if not df_fisc.empty:
+                    if filtro_global:
+                        q = filtro_global.lower()
+                        df_fisc = df_fisc[
+                            df_fisc['nombre_comprador'].str.lower().str.contains(q, na=False) |
+                            df_fisc['entidad_fiscalizada'].str.lower().str.contains(q, na=False)
+                        ]
+                    if not df_fisc.empty:
+                        df_fisc['gasto_total'] = df_fisc['gasto_total'].apply(format_clp_full)
+                        st.dataframe(df_fisc, hide_index=True, use_container_width=True)
+                        st.warning(
+                            f"⚠️ {df_fisc['nombre_comprador'].nunique()} organismos compradores "
+                            "están bajo fiscalización activa de la CGR."
+                        )
+                    else:
+                        st.info("🛡️ Sin coincidencias con el filtro actual.")
+                else:
+                    st.info("🛡️ Sin datos de fiscalizaciones cargados. Ejecuta el conector de Contraloría primero.")
+            except ImportError:
+                st.info("Conector de Contraloría no disponible.")
+            except Exception as exc:
+                logger.warning("Error en cruce compradores-fiscalizaciones: %s", exc)
+                st.info("Cruce compradores↔fiscalizaciones no disponible.")
+
+            # ── Cruce: Funcionarios con intereses en proveedores (InfoProbidad) ──
+            st.markdown("### 🏛️ Conflictos de Interés — InfoProbidad")
+            st.caption(
+                "Busca si algún funcionario declaró actividades o participación "
+                "en sociedades que coincidan con proveedores del Estado."
+            )
+            try:
+                from infoprobidad_connector import InfoProbidadConnector
+                ip = InfoProbidadConnector(DB_PATH)
+
+                # Obtener top proveedores sospechosos para cruzar
+                with sqlite3.connect(DB_PATH) as conn_ip:
+                    top_proveedores = pd.read_sql_query(
+                        """
+                        SELECT DISTINCT nombre_proveedor,
+                               SUM(monto_total_item) as gasto_total
+                        FROM ordenes_items
+                        WHERE estado != '9' AND nombre_proveedor IS NOT NULL
+                        GROUP BY nombre_proveedor
+                        ORDER BY gasto_total DESC
+                        LIMIT 20
+                        """,
+                        conn_ip,
+                    )
+
+                if not top_proveedores.empty:
+                    conflictos = []
+                    with st.spinner("Consultando InfoProbidad (SPARQL)..."):
+                        for _, prov in top_proveedores.iterrows():
+                            nombre_prov = prov["nombre_proveedor"]
+                            if nombre_prov and len(nombre_prov) > 5:
+                                # Usar solo la parte más significativa del nombre
+                                palabras = [
+                                    p for p in nombre_prov.split()
+                                    if p.upper() not in {"S.A.", "SPA", "SpA", "LTDA", "LTDA.",
+                                                         "E.I.R.L.", "S.A", "EIRL", "Y", "DE",
+                                                         "DEL", "LA", "LOS", "LAS"}
+                                    and len(p) > 2
+                                ]
+                                if palabras:
+                                    busqueda = " ".join(palabras[:2])
+                                    cruces = ip.cruzar_con_proveedor(busqueda)
+                                    for c in cruces:
+                                        c["proveedor_buscado"] = nombre_prov
+                                        c["gasto_total_proveedor"] = prov["gasto_total"]
+                                        conflictos.append(c)
+
+                    if conflictos:
+                        df_conflictos = pd.DataFrame(conflictos)
+                        df_conflictos['gasto_total_proveedor'] = df_conflictos['gasto_total_proveedor'].apply(format_clp_full)
+                        st.dataframe(df_conflictos, hide_index=True, use_container_width=True)
+                        st.error(
+                            f"🚨 {len(conflictos)} posibles conflictos de interés detectados. "
+                            "Funcionarios con vínculos declarados a proveedores del Estado."
+                        )
+                    else:
+                        st.info("🛡️ Sin conflictos de interés detectados en los top 20 proveedores.")
+                else:
+                    st.info("Sin proveedores en la base de datos para cruzar.")
+            except ImportError:
+                st.info("Conector de InfoProbidad no disponible.")
+            except Exception as exc:
+                logger.warning("Error en cruce InfoProbidad: %s", exc)
+                st.info("Cruce funcionarios↔proveedores (InfoProbidad) no disponible.")
+
         except (OSError, pd.errors.DatabaseError, sqlite3.Error) as e:
             logger.error("Error en cruces forenses: %s", e)
             st.error(f"Error cargando cruces forenses: {e}")
@@ -852,14 +948,68 @@ def main():
             st.info("**BioBio TV**\n\nAlertas preventivas por radio y TV.")
             st.markdown("<a href='https://www.biobiochile.cl/bbtv' target='_blank' class='btn-portal'>📡 Sintonizar BioBio TV</a>", unsafe_allow_html=True)
 
+        # ── Nuevas fuentes de datos integradas ──
+        st.markdown("---")
+        st.markdown("### 🗂️ Fuentes de Datos Integradas al Motor de Cruce")
+        st.caption("Estas fuentes se consultan automáticamente en los cruces forenses y búsqueda de personas.")
+
+        col_f1, col_f2, col_f3 = st.columns(3)
+
+        with col_f1:
+            st.markdown("#### InfoProbidad")
+            st.success(
+                "**Declaraciones de Patrimonio e Intereses**\n\n"
+                "116,000+ declaraciones de funcionarios públicos: "
+                "cargo, institución, actividades económicas, bienes, "
+                "acciones en sociedades, pasivos.\n\n"
+                "**Cruce clave:** ¿El funcionario que aprobó la compra "
+                "tiene intereses en la empresa proveedora?"
+            )
+            st.markdown(
+                "<a href='https://www.infoprobidad.cl' target='_blank' class='btn-portal'>"
+                "🏛️ Ir a InfoProbidad</a>",
+                unsafe_allow_html=True,
+            )
+
+        with col_f2:
+            st.markdown("#### Contraloría (SICA)")
+            st.success(
+                "**Fiscalizaciones en Curso**\n\n"
+                "2,000+ fiscalizaciones activas: región, sector, "
+                "entidad, tipo, materia de investigación.\n\n"
+                "**Cruce clave:** ¿El organismo comprador está "
+                "actualmente bajo fiscalización de la CGR?"
+            )
+            st.markdown(
+                "<a href='https://www.contraloria.cl/web/cgr/fiscalizaciones-en-curso' "
+                "target='_blank' class='btn-portal'>🔍 Ver Fiscalizaciones</a>",
+                unsafe_allow_html=True,
+            )
+
+        with col_f3:
+            st.markdown("#### DIPRES (datos.gob.cl)")
+            st.success(
+                "**Presupuestos y Dotación**\n\n"
+                "Datos de presupuesto por institución, dotación "
+                "de personal, gastos en honorarios.\n\n"
+                "**Cruce clave:** ¿El organismo gasta más en compras "
+                "de lo que su presupuesto sugiere?"
+            )
+            st.markdown(
+                "<a href='https://www.dipres.gob.cl' target='_blank' class='btn-portal'>"
+                "💰 Ir a DIPRES</a>",
+                unsafe_allow_html=True,
+            )
+
     # ══════════════════════════════════════════════════════════════════════════
     # PESTAÑA 5: EN LA MIRA — Alertas de Personas de Interés Público
     # ══════════════════════════════════════════════════════════════════════════
     with tab_mira:
         st.markdown("### 🔍 Personas en la Mira")
         st.caption(
-            "Búsqueda en fuentes oficiales del Estado de Chile: InfoLobby, datos.gob.cl, "
-            "Contraloría, SERVEL y Mercado Público. Solo datos reales y verificables."
+            "Búsqueda en 7 fuentes oficiales del Estado de Chile: InfoLobby, datos.gob.cl, "
+            "Contraloría, SERVEL, Mercado Público, InfoProbidad y Fiscalizaciones CGR. "
+            "Solo datos reales y verificables."
         )
 
         col_buscar, col_opciones = st.columns([3, 1])

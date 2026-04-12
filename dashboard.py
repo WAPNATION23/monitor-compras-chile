@@ -1688,6 +1688,7 @@ def _render_tab_ia(df_filtrado, prompt=None):
                             "content": f"SISTEMA: Infiltración para {rut_detectado} completada. Historial inyectado en DB."
                         })
 
+            st.session_state["_show_ia_response"] = True
             st.rerun()
 
 
@@ -1859,15 +1860,33 @@ def main():
     # ─────────────────────────────────────────────────────────────────────────
     # ENRUTAMIENTO POR PESTAÑAS (Limpieza Visual)
     # ─────────────────────────────────────────────────────────────────────────
-    tab_estadisticas, tab_cruce, tab_registro, tab_medios, tab_mira, tab_analistas, tab_ia = st.tabs([
+
+    # Detectar si hay una consulta pendiente para la IA
+    _has_pending = "_pending_query" in st.session_state
+
+    # Determinar pestaña por defecto (switch automático al tab IA si hay query pendiente)
+    tab_names = [
         "Panel General",
         "Cruces Forenses",
         "Datos Crudos",
         "Fuentes",
         "🔍 En la Mira",
         "Denuncias",
-        "Asistente IA"
-    ])
+        "🧠 Asistente IA",
+    ]
+
+    if _has_pending:
+        st.info("🧠 **Procesando consulta…** — La respuesta aparecerá aquí en un momento.", icon="🔍")
+
+    # Mostrar última respuesta de la IA (visible desde cualquier pestaña)
+    if st.session_state.pop("_show_ia_response", False):
+        _ia_msgs = st.session_state.get("ia_messages", [])
+        if _ia_msgs and _ia_msgs[-1]["role"] == "assistant":
+            with st.expander("🧠 Respuesta del Cerebro Forense", expanded=True):
+                st.markdown(_ia_msgs[-1]["content"])
+                st.caption("💡 Puedes ver el historial completo en la pestaña **🧠 Asistente IA**.")
+
+    tab_estadisticas, tab_cruce, tab_registro, tab_medios, tab_mira, tab_analistas, tab_ia = st.tabs(tab_names)
 
 
 

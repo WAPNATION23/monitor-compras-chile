@@ -705,6 +705,37 @@ def main():
             else:
                 st.info("No hay datos de dueños reales vinculados al Mercado Público en la base local aún.")
 
+            # ── Cruce 8: Anomalías → Personas (SERVEL + Lobby) ──
+            st.markdown("---")
+            st.markdown("### 🕵️ Cruce Anomalías ↔ Vínculos Políticos")
+            st.caption(
+                "Proveedores flaggeados por el detector de anomalías que ADEMÁS "
+                "aparecen como donantes electorales (SERVEL) o en audiencias de lobby (InfoLobby)."
+            )
+            with st.spinner("Ejecutando detector + cruce de personas..."):
+                try:
+                    df_cruce_personas = xref.cruce_anomalias_personas()
+                    if filtro_global and not df_cruce_personas.empty:
+                        q = filtro_global.lower()
+                        df_cruce_personas = df_cruce_personas[
+                            df_cruce_personas['nombre_proveedor'].str.lower().str.contains(q, na=False) |
+                            df_cruce_personas['rut_proveedor'].str.lower().str.contains(q, na=False)
+                        ]
+                    if not df_cruce_personas.empty:
+                        df_cruce_personas['monto_anomalo'] = df_cruce_personas['monto_anomalo'].apply(format_clp_full)
+                        if 'donacion_total_servel' in df_cruce_personas.columns:
+                            df_cruce_personas['donacion_total_servel'] = df_cruce_personas['donacion_total_servel'].apply(format_clp_full)
+                        st.dataframe(df_cruce_personas, hide_index=True, use_container_width=True)
+                        st.warning(
+                            f"⚠️ {len(df_cruce_personas)} proveedores con anomalías detectadas "
+                            "Y vínculos políticos confirmados."
+                        )
+                    else:
+                        st.info("🛡️ Ningún proveedor anómalo tiene vínculos SERVEL/Lobby detectados (o las fuentes no están cargadas).")
+                except Exception as exc:
+                    logger.warning("Error en cruce anomalías→personas: %s", exc)
+                    st.info("Cruce anomalías→personas no disponible. El detector puede tardar con datasets grandes.")
+
         except (OSError, pd.errors.DatabaseError, sqlite3.Error) as e:
             logger.error("Error en cruces forenses: %s", e)
             st.error(f"Error cargando cruces forenses: {e}")

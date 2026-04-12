@@ -463,6 +463,191 @@ class CrossReferencer:
                 logger.error("Error en escaneo de red societaria: %s", e)
                 return pd.DataFrame()
 
+    # ══════════════════════════════════════════════════════════════════════════ #
+    # CRUCE 8: ANOMALÍAS → PERSONAS (Proveedor ↔ Donante ↔ Lobby)
+    # ══════════════════════════════════════════════════════════════════════════ #
+
+    def cruce_anomalias_personas(self, metodo: str = "serenata") -> pd.DataFrame:
+        """
+        Toma las anomalías detectadas por el detector y cruza los proveedores
+        involucrados contra:
+          - SERVEL: ¿El proveedor (o su dueño) donó a campañas políticas?
+          - InfoLobby: ¿El proveedor se reunió con funcionarios antes de la compra?
+
+        Produce un DataFrame donde cada fila es un proveedor flaggeado en anomalías
+        que ADEMÁS tiene vínculos políticos (donaciones o reuniones de lobby).
+
+        Args:
+            metodo: Método de detección ('serenata', 'all', etc.)
+
+        Returns:
+            DataFrame con: proveedor, anomalías, donaciones SERVEL, reuniones lobby.
+        """
+        from detector import AnomalyDetector
+
+        # 1. Obtener anomalías
+        detector = AnomalyDetector(db_path=self.db_path)
+        anomalias = detector.detect(method=metodo)
+
+        if anomalias.empty:
+            logger.info("Sin anomalías detectadas — no hay cruces que hacer.")
+            return pd.DataFrame()
+
+        # 2. Extraer proveedores únicos de anomalías (con stats)
+        prov_stats = anomalias.groupby(["rut_proveedor", "nombre_proveedor"]).agg(
+            n_anomalias=("codigo_oc", "count"),
+            metodos_detectados=("metodo", lambda x: ", ".join(sorted(x.unique()))),
+            monto_anomalo=("monto_total_item", "sum"),
+            ocs_anomalas=("codigo_oc", "nunique"),
+        ).reset_index()
+        prov_stats = prov_stats[prov_stats["rut_proveedor"].str.strip() != ""]
+
+        logger.info(
+            "Cruce anomalías→personas: %d proveedores flaggeados.",
+            len(prov_stats),
+        )
+
+        # 3. Cruzar con SERVEL (aportes electorales)
+        servel_matches = []
+        with sqlite3.connect(self.db_path) as conn:
+            check = pd.read_sql_query(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='aportes_servel'",
+                conn,
+            )
+            if not check.empty:
+                for _, prov in prov_stats.iterrows():
+                    rut = prov["rut_proveedor"].replace("-", "")
+                    nombre = prov["nombre_proveedor"]
+                    try:
+                        df_servel = pd.read_sql_query(
+                            """
+                            SELECT nombre_aportante, nombre_receptor, monto_aporte,
+                                   eleccion_campaña
+                            FROM aportes_servel
+                            WHERE REPLACE(rut_aportante, '-', '') = ?
+                               OR nombre_aportante LIKE ?
+                            """,
+                            conn,
+                            params=(rut, f"%{nombre[:20]}%"),
+                        )
+                        if not df_servel.empty:
+                            total_donado = df_servel["monto_aporte"].sum()
+                            receptores = ", ".join(df_servel["nombre_receptor"].unique()[:3])
+                            servel_matches.append({
+                                "rut_proveedor": prov["rut_proveedor"],
+                                "donacion_total_servel": total_donado,
+                                "receptores_politicos": receptores,
+                                "n_donaciones": len(df_servel),
+                            })
+                    except (sqlite3.Error, pd.errors.DatabaseError):
+                        continue
+
+        # 4. Cruzar con InfoLobby (audiencias)
+        lobby_matches = []
+        try:
+            import re as _re
+            for _, prov in prov_stats.iterrows():
+                nombre = prov["nombre_proveedor"]
+                if not nombre or len(nombre) < 3:
+                    continue
+                nombre_safe = _re.sub(r'[\\"\'\}\)\{\(<>;&|]', "", nombre).strip()
+                if len(nombre_safe) < 3:
+                    continue
+
+                sparql = f"""
+                PREFIX cplt: <http://datos.infolobby.cl/def#>
+                PREFIX foaf: <http://xmlns.com/foaf/0.1/>
+                PREFIX dcterms: <http://purl.org/dc/terms/>
+
+                SELECT (COUNT(?audiencia) AS ?total) ?sujetoPasivo
+                WHERE {{
+                    ?audiencia a cplt:RegistroAudiencia ;
+                               cplt:sujetoPasivo ?sp ;
+                               cplt:sujetoActivo ?sa .
+                    ?sp foaf:name ?sujetoPasivo .
+                    ?sa foaf:name ?sujetoActivo .
+                    FILTER(
+                        CONTAINS(LCASE(?sujetoActivo), LCASE("{nombre_safe}"))
+                    )
+                }}
+                GROUP BY ?sujetoPasivo
+                LIMIT 10
+                """
+                try:
+                    import requests
+                    resp = requests.get(
+                        "http://datos.infolobby.cl/sparql",
+                        params={"query": sparql, "format": "json"},
+                        timeout=15,
+                    )
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        bindings = data.get("results", {}).get("bindings", [])
+                        if bindings:
+                            total = sum(
+                                int(b.get("total", {}).get("value", 0))
+                                for b in bindings
+                            )
+                            autoridades = ", ".join(
+                                b.get("sujetoPasivo", {}).get("value", "")
+                                for b in bindings[:3]
+                            )
+                            lobby_matches.append({
+                                "rut_proveedor": prov["rut_proveedor"],
+                                "n_audiencias_lobby": total,
+                                "autoridades_reunidas": autoridades,
+                            })
+                except Exception:
+                    continue
+        except Exception as exc:
+            logger.warning("Error consultando InfoLobby para cruce: %s", exc)
+
+        # 5. Fusionar todo
+        result = prov_stats.copy()
+
+        if servel_matches:
+            df_servel_m = pd.DataFrame(servel_matches)
+            result = result.merge(df_servel_m, on="rut_proveedor", how="left")
+        else:
+            result["donacion_total_servel"] = 0
+            result["receptores_politicos"] = ""
+            result["n_donaciones"] = 0
+
+        if lobby_matches:
+            df_lobby_m = pd.DataFrame(lobby_matches)
+            result = result.merge(df_lobby_m, on="rut_proveedor", how="left")
+        else:
+            result["n_audiencias_lobby"] = 0
+            result["autoridades_reunidas"] = ""
+
+        # Rellenar NaN
+        result["donacion_total_servel"] = result["donacion_total_servel"].fillna(0)
+        result["n_donaciones"] = result["n_donaciones"].fillna(0).astype(int)
+        result["n_audiencias_lobby"] = result["n_audiencias_lobby"].fillna(0).astype(int)
+        result["receptores_politicos"] = result["receptores_politicos"].fillna("")
+        result["autoridades_reunidas"] = result["autoridades_reunidas"].fillna("")
+
+        # Filtrar: solo proveedores que tienen al menos un vínculo político
+        vinculados = result[
+            (result["donacion_total_servel"] > 0)
+            | (result["n_audiencias_lobby"] > 0)
+        ].copy()
+
+        # Score de peligrosidad: anomalías × vínculos
+        vinculados["score_peligro"] = (
+            vinculados["n_anomalias"]
+            + vinculados["n_donaciones"] * 5
+            + vinculados["n_audiencias_lobby"] * 3
+        )
+        vinculados = vinculados.sort_values("score_peligro", ascending=False)
+
+        logger.info(
+            "Cruce completo: %d proveedores con anomalías Y vínculos políticos.",
+            len(vinculados),
+        )
+
+        return vinculados
+
     # ═══════════ Reporte Ejecutivo ═══════════ #
 
     def reporte_ejecutivo(self) -> dict[str, Any]:

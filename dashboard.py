@@ -375,6 +375,25 @@ def _run_extraction(max_oc: int):
         st.error(f"Error durante la extracción: {exc}")
 
 
+def _investigate_buttons(entities: list[tuple[str, str]], prefix: str, entity_type: str = "proveedor"):
+    """Render quick-investigate buttons that pre-fill the IA chat.
+
+    Args:
+        entities: list of (name, rut) tuples.
+        prefix: unique key prefix to avoid Streamlit duplicate keys.
+        entity_type: 'proveedor' or 'organismo'.
+    """
+    cols = st.columns(min(len(entities), 5))
+    for i, (name, rut) in enumerate(entities[:5]):
+        with cols[i]:
+            label = name[:22] + "…" if len(name) > 22 else name
+            if st.button(f"🔍 {label}", key=f"inv_{prefix}_{i}", use_container_width=True):
+                if entity_type == "proveedor":
+                    query = f"Investiga al proveedor {name} (RUT {rut}): ¿tiene anomalías, vínculos políticos, fiscalizaciones o aportes electorales?"
+                else:
+                    query = f"Investiga al organismo {name} (RUT {rut}): ¿abusa del trato directo, tiene fiscalizaciones de CGR o proveedores sospechosos?"
+                st.session_state["_pending_query"] = query
+                st.rerun()
 
 
 def _render_tab_general(df_filtrado, total_gasto, total_oc, total_proveedores, total_compradores, pct_td, n_trato_directo):
@@ -619,6 +638,9 @@ def _render_tab_cruces(df_filtrado, total_proveedores, total_compradores, n_trat
                 )
                 df_sosp['monto_total'] = df_sosp['monto_total'].apply(format_clp_full)
                 st.dataframe(df_sosp, hide_index=True, use_container_width=True)
+                # Quick-investigate buttons for top suspicious providers
+                inv_entities = list(zip(df_sosp['nombre_proveedor'], df_sosp['rut_proveedor']))
+                _investigate_buttons(inv_entities, "sosp", "proveedor")
             else:
                 st.info("Sin anomalías encontradas bajo este filtro.")
 
@@ -632,8 +654,11 @@ def _render_tab_cruces(df_filtrado, total_proveedores, total_compradores, n_trat
                                       df_riesgo['rut_comprador'].str.lower().str.contains(q, na=False)]
 
             if not df_riesgo.empty:
-                df_riesgo['monto_total'] = df_riesgo['monto_total'].apply(format_clp_full)
-                st.dataframe(df_riesgo.head(10), hide_index=True, use_container_width=True)
+                df_riesgo_show = df_riesgo.head(10)
+                df_riesgo_show['monto_total'] = df_riesgo_show['monto_total'].apply(format_clp_full)
+                st.dataframe(df_riesgo_show, hide_index=True, use_container_width=True)
+                inv_orgs = list(zip(df_riesgo.head(10)['nombre_comprador'], df_riesgo.head(10)['rut_comprador']))
+                _investigate_buttons(inv_orgs, "riesgo_org", "organismo")
             else:
                 st.info("Sin datos para analizar.")
 
@@ -650,7 +675,9 @@ def _render_tab_cruces(df_filtrado, total_proveedores, total_compradores, n_trat
             if not df_td.empty:
                 df_td['monto_total'] = df_td['monto_total'].apply(format_clp_full)
                 df_td['monto_td'] = df_td['monto_td'].apply(format_clp_full)
-                st.dataframe(df_td.head(10)[['nombre_comprador', 'ratio_td', 'n_trato_directo', 'n_total']], hide_index=True, use_container_width=True)
+                td_cols = ['nombre_comprador', 'rut_comprador', 'ratio_td', 'n_trato_directo', 'n_total', 'monto_td', 'monto_total']
+                td_cols = [c for c in td_cols if c in df_td.columns]
+                st.dataframe(df_td.head(10)[td_cols], hide_index=True, use_container_width=True)
             else:
                 st.info("Sin datos bajo este filtro.")
 
@@ -666,7 +693,12 @@ def _render_tab_cruces(df_filtrado, total_proveedores, total_compradores, n_trat
             if not df_conc.empty:
                 df_conc = df_conc.head(5)
                 df_conc['total_adjudicado'] = df_conc['total_adjudicado'].apply(format_clp_full)
-                st.dataframe(df_conc[['nombre_proveedor', 'total_adjudicado', 'pct_del_total']], hide_index=True, use_container_width=True)
+                conc_cols = ['nombre_proveedor', 'rut_proveedor', 'total_adjudicado', 'pct_del_total', 'n_ordenes']
+                conc_cols = [c for c in conc_cols if c in df_conc.columns]
+                st.dataframe(df_conc[conc_cols], hide_index=True, use_container_width=True)
+                if 'rut_proveedor' in df_conc.columns:
+                    inv_conc = list(zip(df_conc['nombre_proveedor'], df_conc['rut_proveedor']))
+                    _investigate_buttons(inv_conc, "conc", "proveedor")
             else:
                 st.info("Sin datos bajo este filtro.")
 
@@ -880,10 +912,10 @@ def _render_tab_datos(df_filtrado, filtro_global):
     with sub_oc:
         if not df_filtrado.empty:
             mostrar_col = [
-                'codigo_oc', 'categoria_riesgo', 'nombre_comprador',
+                'codigo_oc', 'tipo_oc', 'categoria_riesgo', 'nombre_comprador',
                 'rut_comprador', 'nombre_proveedor', 'rut_proveedor',
                 'nombre_producto', 'cantidad',
-                'precio_unitario', 'monto_total_item', 'fecha_creacion'
+                'precio_unitario', 'monto_total_item', 'estado', 'fecha_creacion'
             ]
             dt_display = df_filtrado[mostrar_col].copy()
             if pd.api.types.is_datetime64_any_dtype(dt_display['fecha_creacion']):
@@ -904,6 +936,7 @@ def _render_tab_datos(df_filtrado, filtro_global):
                 hide_index=True,
                 column_config={
                     "codigo_oc": st.column_config.TextColumn("Código OC"),
+                    "tipo_oc": st.column_config.TextColumn("Tipo"),
                     "categoria_riesgo": st.column_config.TextColumn("Nivel Riesgo"),
                     "nombre_comprador": st.column_config.TextColumn("Entidad de Gobierno"),
                     "rut_comprador": st.column_config.TextColumn("RUT Comprador"),
@@ -918,6 +951,7 @@ def _render_tab_datos(df_filtrado, filtro_global):
                         min_value=0,
                         max_value=max(dt_display['monto_total_item'].max(), 1)
                     ),
+                    "estado": st.column_config.TextColumn("Estado"),
                     "fecha_creacion": st.column_config.DateColumn("Fecha Emisión")
                 }
             )

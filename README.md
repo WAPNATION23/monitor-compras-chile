@@ -4,7 +4,7 @@
 
 ![Beta Pública](https://img.shields.io/badge/Estado-Beta%20Pública-orange)
 ![Python](https://img.shields.io/badge/Python-3.10%2B-blue)
-![Tests](https://img.shields.io/badge/Tests-65%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/Tests-89%20passing-brightgreen)
 ![CI](https://img.shields.io/github/actions/workflow/status/WAPNATION23/monitor-compras-chile/ci.yml?label=CI)
 ![Licencia](https://img.shields.io/badge/Licencia-AGPL--3.0-blue)
 

@@ -42,128 +42,182 @@ _LOGO_PATH = "logo_ojo_pueblo.png"
 
 _CUSTOM_CSS: str = """
 <style>
-    @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
     .stApp {
-        background-color: #05080E;
-        background-image:
-            linear-gradient(rgba(14, 21, 35, 0.4) 1px, transparent 1px),
-            linear-gradient(90deg, rgba(14, 21, 35, 0.4) 1px, transparent 1px);
-        background-size: 30px 30px;
-        color: #D1D5DB;
-        font-family: 'Space Grotesk', sans-serif;
+        background-color: #0B1120;
+        color: #CBD5E1;
+        font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
     }
-    .css-1r6slb0, .css-12oz5g7, div[data-testid="stSidebar"] {
-        background-color: rgba(9, 13, 20, 0.95) !important;
-        border-right: 1px solid #1E293B;
-        backdrop-filter: blur(10px);
+    div[data-testid="stSidebar"] {
+        background: linear-gradient(180deg, #0F172A 0%, #0B1120 100%) !important;
+        border-right: 1px solid rgba(51, 65, 85, 0.5);
     }
     h1, h2, h3, h4 {
-        color: #F8FAFC !important;
-        font-family: 'Space Grotesk', sans-serif;
-        font-weight: 600;
-        letter-spacing: -0.02em;
+        color: #F1F5F9 !important;
+        font-family: 'Inter', sans-serif;
+        font-weight: 700;
+        letter-spacing: -0.025em;
     }
-    h1 {
-        border-bottom: 2px solid #2563EB;
-        padding-bottom: 12px;
-        margin-bottom: 30px;
-        font-size: 2.2rem;
-        text-shadow: 0px 0px 15px rgba(37, 99, 235, 0.2);
-    }
+    h1 { font-size: 2rem; border-bottom: none; padding-bottom: 0; margin-bottom: 4px; }
+    h3 { font-size: 1.15rem; margin-bottom: 4px; }
+    h4 { font-size: 0.95rem; font-weight: 600; color: #94A3B8 !important; }
     [data-testid="stMetricValue"] {
-        font-size: 1.5rem; font-weight: 700; color: #FFFFFF !important;
-        background: -webkit-linear-gradient(45deg, #60A5FA, #FFFFFF);
-        -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+        font-size: 1.6rem; font-weight: 800;
+        color: #F8FAFC !important;
+        background: none; -webkit-text-fill-color: #F8FAFC;
     }
     [data-testid="stMetricLabel"] {
-        font-size: 0.75rem; color: #94A3B8 !important;
-        text-transform: uppercase; letter-spacing: 0.05em;
+        font-size: 0.7rem; color: #64748B !important;
+        text-transform: uppercase; letter-spacing: 0.08em; font-weight: 500;
     }
     div[data-testid="metric-container"] {
-        background: rgba(15, 23, 42, 0.6); border: 1px solid #1E293B;
-        padding: 12px 10px; border-radius: 8px;
-        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+        background: linear-gradient(135deg, rgba(15, 23, 42, 0.8) 0%, rgba(30, 41, 59, 0.4) 100%);
+        border: 1px solid rgba(51, 65, 85, 0.5);
+        padding: 16px 14px; border-radius: 12px;
+        backdrop-filter: blur(8px);
+        transition: border-color 0.2s ease;
     }
-    .stChatInput { border-color: #334155 !important; }
-    /* ── Chat Gemini-style ── */
+    div[data-testid="metric-container"]:hover { border-color: rgba(59, 130, 246, 0.5); }
+    .stChatInput { border-color: #1E293B !important; }
     .chat-container {
-        max-height: 520px;
-        overflow-y: auto;
-        padding: 16px 8px;
-        border: 1px solid #1E293B;
-        border-radius: 12px;
-        background: #0a0f1a;
-        margin-bottom: 12px;
-        scroll-behavior: smooth;
+        max-height: 520px; overflow-y: auto;
+        padding: 20px 12px;
+        border: 1px solid rgba(51, 65, 85, 0.4);
+        border-radius: 16px;
+        background: rgba(15, 23, 42, 0.5);
+        margin-bottom: 12px; scroll-behavior: smooth;
     }
-    .chat-container::-webkit-scrollbar { width: 6px; }
+    .chat-container::-webkit-scrollbar { width: 5px; }
     .chat-container::-webkit-scrollbar-track { background: transparent; }
-    .chat-container::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
+    .chat-container::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
     .chat-bubble {
-        max-width: 80%;
-        padding: 12px 16px;
-        border-radius: 18px;
-        margin-bottom: 8px;
-        font-size: 0.9rem;
-        line-height: 1.55;
-        word-wrap: break-word;
+        max-width: 78%; padding: 12px 16px;
+        border-radius: 16px; margin-bottom: 8px;
+        font-size: 0.88rem; line-height: 1.6; word-wrap: break-word;
     }
     .chat-bubble p { margin: 0 0 6px 0; }
     .chat-bubble p:last-child { margin-bottom: 0; }
     .chat-row-user { display: flex; justify-content: flex-end; }
     .chat-row-assistant { display: flex; justify-content: flex-start; }
     .bubble-user {
-        background: #1d4ed8;
-        color: #e0e7ff;
-        border-bottom-right-radius: 4px;
+        background: linear-gradient(135deg, #2563EB, #1D4ED8);
+        color: #E0E7FF; border-bottom-right-radius: 4px;
     }
     .bubble-assistant {
-        background: #1e293b;
-        color: #d1d5db;
-        border: 1px solid #334155;
+        background: rgba(30, 41, 59, 0.8);
+        color: #CBD5E1; border: 1px solid rgba(51, 65, 85, 0.5);
         border-bottom-left-radius: 4px;
     }
     .chat-label {
-        font-size: 0.7rem;
-        color: #64748b;
-        margin-bottom: 2px;
-        padding: 0 4px;
+        font-size: 0.68rem; color: #475569;
+        margin-bottom: 2px; padding: 0 4px;
+        font-weight: 500; text-transform: uppercase; letter-spacing: 0.04em;
     }
     .stDownloadButton > button {
-        background-color: #1E293B !important; color: #94A3B8 !important;
-        border: 1px solid #334155 !important; font-size: 0.8rem;
+        background: rgba(15, 23, 42, 0.6) !important; color: #94A3B8 !important;
+        border: 1px solid rgba(51, 65, 85, 0.5) !important; font-size: 0.8rem;
+        border-radius: 8px; transition: all 0.2s;
     }
     .stDownloadButton > button:hover {
-        background-color: #334155 !important; color: #F8FAFC !important;
+        background: rgba(30, 41, 59, 0.8) !important; color: #F1F5F9 !important;
+        border-color: rgba(59, 130, 246, 0.4) !important;
+    }
+    .btn-portal {
+        display: inline-block; padding: 8px 16px; border-radius: 8px;
+        background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(51, 65, 85, 0.5);
+        color: #94A3B8 !important; text-decoration: none; font-size: 0.82rem;
+        font-weight: 500; transition: all 0.2s; margin-top: 4px;
+    }
+    .btn-portal:hover {
+        background: rgba(30, 41, 59, 0.8); color: #F1F5F9 !important;
+        border-color: rgba(59, 130, 246, 0.4);
     }
     .stTabs [data-baseweb="tab-list"] {
-        gap: 4px; background-color: transparent; padding-bottom: 0px;
-        border-bottom: 1px solid #334155; flex-wrap: wrap; overflow-x: visible !important;
+        gap: 2px; background: transparent; padding-bottom: 0;
+        border-bottom: 2px solid rgba(30, 41, 59, 0.6);
+        flex-wrap: wrap; overflow-x: visible !important;
     }
     .stTabs [data-baseweb="tab-list"] button[role="tab"] { flex: 1 1 auto; min-width: 0; }
     .stTabs [data-baseweb="tab"] {
-        background-color: #0F172A; border: 1px solid #334155; border-bottom: none;
-        padding: 8px 12px; transition: all 0.3s ease; color: #94A3B8;
-        font-weight: 600; border-radius: 6px 6px 0 0;
-        font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.03em; white-space: nowrap;
+        background: transparent; border: none;
+        border-bottom: 2px solid transparent;
+        padding: 10px 16px; transition: all 0.2s ease; color: #64748B;
+        font-weight: 600; border-radius: 0;
+        font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.06em;
+        white-space: nowrap;
     }
+    .stTabs [data-baseweb="tab"]:hover { color: #94A3B8; }
     .stTabs [aria-selected="true"] {
-        background-color: #1E293B !important; color: #38BDF8 !important;
-        border-color: #38BDF8; border-width: 2px 2px 0px 2px;
+        background: transparent !important; color: #3B82F6 !important;
+        border-bottom: 2px solid #3B82F6 !important;
     }
     .stTabs [data-baseweb="tab-list"] > div[role="presentation"] { display: none !important; }
     [data-testid="stDataFrame"] {
-        border-radius: 8px; border: 1px solid #1E293B; overflow: hidden;
-        box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+        border-radius: 12px; border: 1px solid rgba(51, 65, 85, 0.4); overflow: hidden;
     }
-    .stAlert { border-radius: 6px; border: 1px solid #7F1D1D; background: rgba(127, 29, 29, 0.1) !important; }
+    .stAlert { border-radius: 10px; }
     blockquote {
-        background: rgba(37, 99, 235, 0.1) !important;
+        background: rgba(30, 41, 59, 0.4) !important;
         border-left: 3px solid #3B82F6 !important;
-        padding: 12px 16px !important; border-radius: 0 8px 8px 0;
+        padding: 14px 18px !important; border-radius: 0 10px 10px 0;
         color: #94A3B8 !important; font-size: 0.85rem; margin-bottom: 20px;
     }
     blockquote p { margin: 0 !important; }
+    .section-header {
+        display: flex; align-items: center; gap: 10px;
+        margin: 28px 0 12px 0;
+    }
+    .section-header .icon {
+        width: 36px; height: 36px; border-radius: 10px;
+        display: flex; align-items: center; justify-content: center;
+        font-size: 1.1rem; flex-shrink: 0;
+    }
+    .section-header .icon.blue { background: rgba(59, 130, 246, 0.15); }
+    .section-header .icon.red { background: rgba(239, 68, 68, 0.15); }
+    .section-header .icon.amber { background: rgba(245, 158, 11, 0.15); }
+    .section-header .icon.green { background: rgba(16, 185, 129, 0.15); }
+    .section-header .icon.purple { background: rgba(139, 92, 246, 0.15); }
+    .section-header h3 { margin: 0 !important; font-size: 1rem; }
+    .section-header p { margin: 0; color: #64748B; font-size: 0.78rem; }
+    .source-card {
+        background: linear-gradient(135deg, rgba(15, 23, 42, 0.6) 0%, rgba(30, 41, 59, 0.3) 100%);
+        border: 1px solid rgba(51, 65, 85, 0.4);
+        border-radius: 12px; padding: 20px;
+        transition: border-color 0.2s;
+    }
+    .source-card:hover { border-color: rgba(59, 130, 246, 0.4); }
+    .source-card h4 { margin: 0 0 8px 0 !important; font-size: 0.9rem; color: #E2E8F0 !important; }
+    .source-card p { margin: 0; color: #94A3B8; font-size: 0.82rem; line-height: 1.5; }
+    .source-card .badge {
+        display: inline-block; padding: 2px 8px; border-radius: 6px;
+        font-size: 0.7rem; font-weight: 600; margin-bottom: 8px;
+    }
+    .source-card .badge.live { background: rgba(239, 68, 68, 0.15); color: #F87171; }
+    .source-card .badge.data { background: rgba(59, 130, 246, 0.15); color: #60A5FA; }
+    .source-card .badge.press { background: rgba(245, 158, 11, 0.15); color: #FBBF24; }
+    .footer-legal {
+        font-size: 0.78rem; color: #475569; text-align: justify;
+        border: 1px solid rgba(51, 65, 85, 0.3); padding: 20px;
+        border-radius: 12px; background: rgba(15, 23, 42, 0.4); line-height: 1.6;
+    }
+    .footer-legal strong { color: #64748B; }
+    .share-btn {
+        display: inline-flex; align-items: center; gap: 6px;
+        padding: 8px 16px; border-radius: 8px;
+        background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(51, 65, 85, 0.4);
+        color: #94A3B8 !important; text-decoration: none; font-size: 0.82rem;
+        font-weight: 500; transition: all 0.2s; width: 100%; justify-content: center;
+    }
+    .share-btn:hover {
+        background: rgba(30, 41, 59, 0.8); color: #F1F5F9 !important;
+        border-color: rgba(59, 130, 246, 0.4); text-decoration: none;
+    }
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #1E293B; border-radius: 4px; }
+    #MainMenu { visibility: hidden; }
+    footer { visibility: hidden; }
+    header[data-testid="stHeader"] { background: transparent; }
 </style>
 """
 st.set_page_config(
@@ -195,6 +249,15 @@ COLOR_DISCRETE_MAP = {
     "MOP/OBRAS": "#F59E0B",
     "GENERAL": "#6366F1"
 }
+
+_CHART_LAYOUT = dict(
+    paper_bgcolor="rgba(0,0,0,0)",
+    plot_bgcolor="rgba(0,0,0,0)",
+    font=dict(family="Inter, sans-serif", size=11, color="#94A3B8"),
+    margin=dict(l=0, r=0, t=10, b=0),
+    xaxis=dict(gridcolor="rgba(51,65,85,0.3)", zerolinecolor="rgba(51,65,85,0.3)"),
+    yaxis=dict(gridcolor="rgba(51,65,85,0.3)", zerolinecolor="rgba(51,65,85,0.3)"),
+)
 
 # ─────────────────────────────────────────────────────────────────────────
 # INTERFAZ: CENTRO DE MONITOREO
@@ -302,15 +365,23 @@ def _run_extraction(max_oc: int):
 def main():
     init_feedback_db()
 
-    # ENCABEZADO PRINCIPAL (Compacto)
-    col_t1, col_t2 = st.columns([0.1, 0.9])
+    # ENCABEZADO PRINCIPAL
+    col_t1, col_t2, col_t3 = st.columns([0.06, 0.64, 0.3])
     with col_t1:
         if os.path.exists(_LOGO_PATH):
             st.image(_LOGO_PATH, use_container_width=True)
     with col_t2:
         st.title("Ojo del Pueblo")
-        st.markdown("*Fiscalización ciudadana de compras del Estado de Chile en tiempo real.*")
-        st.caption(f"Datos de Mercado Público (API ChileCompra) | Actualizado: {datetime.now().strftime('%d/%m/%Y %H:%M')}")
+        st.caption("Plataforma de fiscalización ciudadana — Compras públicas del Estado de Chile")
+    with col_t3:
+        st.markdown(
+            f"<div style='text-align:right; padding-top:12px;'>"
+            f"<span style='color:#475569; font-size:0.75rem;'>Última actualización</span><br>"
+            f"<span style='color:#94A3B8; font-size:0.85rem; font-weight:600;'>"
+            f"{datetime.now().strftime('%d/%m/%Y %H:%M')}</span>"
+            f"</div>",
+            unsafe_allow_html=True,
+        )
 
     # VERIFICACIÓN DE BD
     if not os.path.exists(DB_PATH):
@@ -338,27 +409,35 @@ def main():
     # PANEL DE CONTROL LATERAL (FILTROS FORENSES)
     # ─────────────────────────────────────────────────────────────────────────
     with st.sidebar:
-        st.markdown("### Búsqueda")
-        filtro_global = st.text_input("RUT, nombre, empresa o código OC", placeholder="Ej: 76.111.000-1")
+        st.markdown(
+            "<p style='color:#475569; font-size:0.7rem; text-transform:uppercase; "
+            "letter-spacing:0.08em; font-weight:600; margin-bottom:4px;'>Búsqueda global</p>",
+            unsafe_allow_html=True,
+        )
+        filtro_global = st.text_input(
+            "Buscar", placeholder="RUT, nombre, empresa o código OC",
+            key="filtro_global", label_visibility="collapsed",
+        )
 
-        st.markdown("---")
-        st.markdown("### Filtros")
+        st.markdown("<div style='margin:16px 0 8px 0; border-top:1px solid rgba(51,65,85,0.3);'></div>", unsafe_allow_html=True)
+        st.markdown(
+            "<p style='color:#475569; font-size:0.7rem; text-transform:uppercase; "
+            "letter-spacing:0.08em; font-weight:600; margin-bottom:4px;'>Filtros</p>",
+            unsafe_allow_html=True,
+        )
 
-        st.markdown("**Zona geográfica**")
         radar_antofagasta = st.checkbox("Solo Antofagasta")
-        radar_region = st.text_input("Otra región (ej. Biobío):", "")
+        radar_region = st.text_input("Región específica", placeholder="Ej: Biobío", value="")
 
-        st.markdown("**Categoría de riesgo**")
         categorias_disp = df['categoria_riesgo'].dropna().unique().tolist()
-        filtro_cat = st.multiselect("Seleccionar", options=categorias_disp, default=[])
+        filtro_cat = st.multiselect("Categoría de riesgo", options=categorias_disp, default=[])
 
-        st.markdown("**Rango de fechas**")
         fechas_validas = df['fecha_creacion'].dropna()
         if not fechas_validas.empty:
             fecha_min = fechas_validas.min().date()
             fecha_max = fechas_validas.max().date()
             filtro_fecha = st.date_input(
-                "Desde / Hasta",
+                "Rango de fechas",
                 value=(fecha_min, fecha_max),
                 min_value=fecha_min,
                 max_value=fecha_max,
@@ -366,7 +445,7 @@ def main():
         else:
             filtro_fecha = None
 
-        st.markdown("---")
+        st.markdown("<div style='margin:12px 0; border-top:1px solid rgba(51,65,85,0.3);'></div>", unsafe_allow_html=True)
 
     # APLICAR FILTROS
     df_filtrado = df.copy()
@@ -420,9 +499,8 @@ def main():
     with tab_estadisticas:
         # Explicación clara del panel
         st.markdown("""
-        > **Qué estás viendo:** Este panel muestra las **órdenes de compra** emitidas por organismos del Estado de Chile,
-        > obtenidas en tiempo real desde la API de Mercado Público (ChileCompra). El "Gasto Escaneado" es la suma total
-        > de todas las órdenes de compra cargadas en esta plataforma. Usa los filtros del panel izquierdo para explorar.
+        > Este panel muestra **órdenes de compra** emitidas por organismos del Estado de Chile,
+        > obtenidas desde la API de Mercado Público (ChileCompra). Usa los filtros laterales para explorar.
         """)
 
         # KPIs Superiores
@@ -456,8 +534,7 @@ def main():
         col_g1, col_g2 = st.columns(2)
 
         with col_g1:
-            st.markdown("#### Quién recibe más plata del Estado")
-            st.caption("Top 10 proveedores por monto total adjudicado")
+            st.markdown("#### Top 10 proveedores por monto adjudicado")
             if not df_filtrado.empty:
                 top_prov = df_filtrado.groupby('nombre_proveedor')['monto_total_item'].sum().reset_index()
                 top_prov = top_prov.nlargest(10, 'monto_total_item').sort_values('monto_total_item', ascending=True)
@@ -467,28 +544,33 @@ def main():
                     top_prov, x='monto_total_item', y='nombre_proveedor', orientation='h',
                     labels={'monto_total_item': 'Total ($CLP)', 'nombre_proveedor': ''},
                     text='monto_label', template="plotly_dark",
-                    color_discrete_sequence=["#ff3366"]
+                    color_discrete_sequence=["#3B82F6"]
                 )
-                fig_bar.update_layout(margin={"l": 0, "r": 0, "t": 10, "b": 0}, font={"family": "Inter", "size": 11})
-                fig_bar.update_traces(textposition='outside')
+                fig_bar.update_layout(**_CHART_LAYOUT)
+                fig_bar.update_traces(textposition='outside', textfont_size=10, textfont_color="#94A3B8")
                 st.plotly_chart(fig_bar, use_container_width=True)
             else:
                 st.info("Sin datos suficientes.")
 
         with col_g2:
-            st.markdown("#### Quién gasta más del Estado")
-            st.caption("Top 10 organismos públicos por monto de compras")
+            st.markdown("#### Top 10 organismos por gasto")
             if not df_filtrado.empty:
                 top_comp = df_filtrado.groupby('nombre_comprador')['monto_total_item'].sum().reset_index()
                 top_comp = top_comp.nlargest(10, 'monto_total_item')
 
                 fig_pie = px.pie(
                     top_comp, values='monto_total_item', names='nombre_comprador',
-                    template="plotly_dark", hole=0.4,
-                    color_discrete_sequence=px.colors.qualitative.Set2
+                    hole=0.45,
+                    color_discrete_sequence=["#3B82F6", "#6366F1", "#8B5CF6", "#A78BFA",
+                                             "#10B981", "#14B8A6", "#F59E0B", "#F97316",
+                                             "#EF4444", "#EC4899"]
                 )
-                fig_pie.update_traces(textposition='inside', textinfo='percent+label', textfont_size=10)
-                fig_pie.update_layout(margin={"l": 0, "r": 0, "t": 10, "b": 0}, showlegend=False, height=400)
+                fig_pie.update_traces(textposition='inside', textinfo='percent', textfont_size=10)
+                fig_pie.update_layout(
+                    **_CHART_LAYOUT,
+                    showlegend=True, height=400,
+                    legend=dict(font=dict(size=9, color="#94A3B8"), bgcolor="rgba(0,0,0,0)"),
+                )
                 st.plotly_chart(fig_pie, use_container_width=True)
             else:
                 st.info("Sin datos.")
@@ -497,8 +579,8 @@ def main():
         col_g3, col_g4 = st.columns(2)
 
         with col_g3:
-            st.markdown("#### Cómo compran")
-            st.caption("Tipo de orden: D1/C1 = Trato Directo, CM = Convenio Marco, AG = Compra Ágil, LP = Licitación")
+            st.markdown("#### Distribución por tipo de compra")
+            st.caption("D1/C1 = Trato Directo · CM = Convenio Marco · AG = Compra Ágil · LP = Licitación")
             if not df_filtrado.empty:
                 tipo_data = df_filtrado.groupby('tipo_oc').agg(
                     n_oc=('codigo_oc', 'nunique'),
@@ -520,17 +602,16 @@ def main():
                     x='monto', y='tipo_label', orientation='h',
                     text='monto_label', template="plotly_dark",
                     labels={'monto': 'Monto Total', 'tipo_label': ''},
-                    color='monto', color_continuous_scale=['#1E293B', '#EF4444']
+                    color='monto', color_continuous_scale=['#1E293B', '#3B82F6']
                 )
-                fig_tipo.update_layout(margin={"l": 0, "r": 0, "t": 10, "b": 0}, showlegend=False, coloraxis_showscale=False)
-                fig_tipo.update_traces(textposition='outside')
+                fig_tipo.update_layout(**_CHART_LAYOUT, showlegend=False, coloraxis_showscale=False)
+                fig_tipo.update_traces(textposition='outside', textfont_size=10, textfont_color="#94A3B8")
                 st.plotly_chart(fig_tipo, use_container_width=True)
             else:
                 st.info("Sin datos.")
 
         with col_g4:
-            st.markdown("#### Cuándo compran")
-            st.caption("Evolución del gasto diario")
+            st.markdown("#### Evolución del gasto diario")
             if not df_filtrado.empty:
                 df_time = df_filtrado.dropna(subset=['fecha_creacion']).copy()
                 if not df_time.empty:
@@ -538,11 +619,11 @@ def main():
                     gasto_diario.columns = ['fecha', 'monto']
                     fig_line = px.area(
                         gasto_diario, x='fecha', y='monto',
-                        template="plotly_dark",
                         labels={'fecha': 'Fecha', 'monto': 'Gasto del día ($CLP)'},
                         color_discrete_sequence=['#3B82F6']
                     )
-                    fig_line.update_layout(height=350, margin={"l": 0, "r": 0, "t": 10, "b": 0})
+                    fig_line.update_layout(**_CHART_LAYOUT, height=350)
+                    fig_line.update_traces(line=dict(width=2), fillcolor="rgba(59,130,246,0.1)")
                     st.plotly_chart(fig_line, use_container_width=True)
                 else:
                     st.info("No hay fechas válidas.")
@@ -550,7 +631,7 @@ def main():
                 st.info("Sin datos.")
 
         # Fila 3: Alertas rápidas
-        st.markdown("#### Alertas destacadas")
+        st.markdown("#### Órdenes de compra de mayor monto")
         if not df_filtrado.empty:
             top5 = df_filtrado.nlargest(5, 'monto_total_item')[['codigo_oc', 'nombre_proveedor', 'nombre_comprador', 'monto_total_item', 'tipo_oc']].copy()
             top5['monto_total_item'] = top5['monto_total_item'].apply(format_clp)
@@ -561,8 +642,14 @@ def main():
     # PESTAÑA 2: CRUCE DE DATOS FORENSES (CrossReferencer)
     # ══════════════════════════════════════════════════════════════════════════
     with tab_cruce:
-        st.markdown("### Análisis de Cruces y Riesgo")
-        st.caption("Detección de patrones sistemáticos mediante cruces de bases de datos públicas.")
+        st.markdown(
+            '<div class="section-header">'
+            '<div class="icon blue">🔬</div>'
+            '<div><h3>Cruces Forenses</h3>'
+            '<p>Detección de patrones de riesgo mediante cruce de bases de datos públicas</p></div>'
+            '</div>',
+            unsafe_allow_html=True,
+        )
 
         try:
             from cross_referencer import CrossReferencer
@@ -596,7 +683,7 @@ def main():
             c1, c2 = st.columns(2)
 
             with c1:
-                st.markdown("#### 🚩 Ranking de Proveedores Sospechosos")
+                st.markdown("#### Ranking de Proveedores Sospechosos")
                 st.caption("Score compuesto: sobreprecio, concentración, y multigiro.")
                 df_sosp = xref.ranking_proveedores_sospechosos(top_n=100)
                 if filtro_global:
@@ -618,7 +705,7 @@ def main():
                 else:
                     st.info("Sin anomalías encontradas bajo este filtro.")
 
-                st.markdown("#### 🏢 Organismos de Mayor Riesgo")
+                st.markdown("#### Organismos de Mayor Riesgo")
                 st.caption("Score basado en tratos directos excesivos y anomalías.")
                 df_riesgo = xref.ranking_riesgo_organismos()
 
@@ -634,7 +721,7 @@ def main():
                     st.info("Sin datos para analizar.")
 
             with c2:
-                st.markdown("#### 🚨 Abuso de Trato Directo")
+                st.markdown("#### Abuso de Trato Directo")
                 st.caption("Organismos con mayor porcentaje de trato directo sobre total de OC.")
                 df_td = xref.ratio_tratos_directos()
 
@@ -650,7 +737,7 @@ def main():
                 else:
                     st.info("Sin datos bajo este filtro.")
 
-                st.markdown("#### 💰 Concentración de Capital (Ley de Pareto)")
+                st.markdown("#### Concentración de Capital")
                 st.caption("Proveedores que acumulan el mayor porcentaje del gasto público.")
                 df_conc = xref.concentracion_capital(top_n=50)
 
@@ -667,8 +754,14 @@ def main():
                     st.info("Sin datos bajo este filtro.")
 
             st.markdown("---")
-            st.markdown("### 🏛️ Cruce de Datos Políticos: Aportes SERVEL vs. Adjudicaciones")
-            st.caption("🔍 Correlación detectada entre financistas de campañas políticas (Donantes) y empresas que ganan adjudicaciones u Obtienen Trato Directo.")
+            st.markdown(
+                '<div class="section-header">'
+                '<div class="icon red">🏛️</div>'
+                '<div><h3>Aportes SERVEL vs. Adjudicaciones</h3>'
+                '<p>Correlación entre financistas de campañas y empresas con trato directo</p></div>'
+                '</div>',
+                unsafe_allow_html=True,
+            )
             df_servel_cruzado = xref.cruce_servel_compras()
 
             if filtro_global and not df_servel_cruzado.empty:
@@ -687,7 +780,7 @@ def main():
                 st.info("🛡️ Nivel 0 de corrupción detectado o matriz limpia bajo este filtro. (Asegúrate de haber procesado SERVEL).")
 
             st.markdown("---")
-            st.markdown("#### 🏗️ Malla Societaria: Beneficiarios Finales")
+            st.markdown("#### Malla Societaria — Beneficiarios Finales")
             st.caption("Personas naturales detrás de empresas que ganan contratos públicos.")
             df_malla = xref.cruce_malla_societaria()
 
@@ -707,10 +800,13 @@ def main():
 
             # ── Cruce 8: Anomalías → Personas (SERVEL + Lobby) ──
             st.markdown("---")
-            st.markdown("### 🕵️ Cruce Anomalías ↔ Vínculos Políticos")
-            st.caption(
-                "Proveedores flaggeados por el detector de anomalías que ADEMÁS "
-                "aparecen como donantes electorales (SERVEL) o en audiencias de lobby (InfoLobby)."
+            st.markdown(
+                '<div class="section-header">'
+                '<div class="icon purple">🕵️</div>'
+                '<div><h3>Anomalías ↔ Vínculos Políticos</h3>'
+                '<p>Proveedores flaggeados que además aparecen como donantes (SERVEL) o en audiencias de lobby</p></div>'
+                '</div>',
+                unsafe_allow_html=True,
             )
             with st.spinner("Ejecutando detector + cruce de personas..."):
                 try:
@@ -737,8 +833,14 @@ def main():
                     st.info("Cruce anomalías→personas no disponible. El detector puede tardar con datasets grandes.")
 
             # ── Cruce: Compradores bajo Fiscalización CGR ──
-            st.markdown("### 🔎 Compradores bajo Fiscalización CGR")
-            st.caption("Organismos compradores que están actualmente bajo fiscalización de la Contraloría.")
+            st.markdown(
+                '<div class="section-header">'
+                '<div class="icon amber">🔎</div>'
+                '<div><h3>Compradores bajo Fiscalización CGR</h3>'
+                '<p>Organismos compradores actualmente bajo fiscalización de la Contraloría</p></div>'
+                '</div>',
+                unsafe_allow_html=True,
+            )
             try:
                 from contraloria_connector import ContraloriaConnector
                 cgr = ContraloriaConnector(DB_PATH)
@@ -768,10 +870,13 @@ def main():
                 st.info("Cruce compradores↔fiscalizaciones no disponible.")
 
             # ── Cruce: Funcionarios con intereses en proveedores (InfoProbidad) ──
-            st.markdown("### 🏛️ Conflictos de Interés — InfoProbidad")
-            st.caption(
-                "Busca si algún funcionario declaró actividades o participación "
-                "en sociedades que coincidan con proveedores del Estado."
+            st.markdown(
+                '<div class="section-header">'
+                '<div class="icon green">🏛️</div>'
+                '<div><h3>Conflictos de Interés — InfoProbidad</h3>'
+                '<p>Funcionarios que declararon actividades o participación en proveedores del Estado</p></div>'
+                '</div>',
+                unsafe_allow_html=True,
             )
             try:
                 from infoprobidad_connector import InfoProbidadConnector
@@ -841,7 +946,14 @@ def main():
     # PESTAÑA 3: REGISTRO FORENSE RAW
     # ══════════════════════════════════════════════════════════════════════════
     with tab_registro:
-        st.markdown(f"### Registro Completo ({len(df_filtrado)} registros)")
+        st.markdown(
+            '<div class="section-header">'
+            '<div class="icon blue">📋</div>'
+            '<div><h3>Registro Completo</h3>'
+            f'<p>{len(df_filtrado):,} registros cargados</p></div>'
+            '</div>',
+            unsafe_allow_html=True,
+        )
 
         # Sub-tabs para OC y Licitaciones
         sub_oc, sub_lic = st.tabs(["Órdenes de Compra", "Licitaciones Públicas"])
@@ -919,97 +1031,141 @@ def main():
     # PESTAÑA 4: FUENTES OFICIALES Y MEDIOS
     # ══════════════════════════════════════════════════════════════════════════
     with tab_medios:
-        st.markdown("### Fuentes Oficiales y Medios")
-        st.caption("Acceso directo a portales gubernamentales y periodismo de investigación para contrastar hallazgos.")
+        st.markdown(
+            '<div class="section-header">'
+            '<div class="icon blue">📡</div>'
+            '<div><h3>Fuentes y Medios</h3>'
+            '<p>Acceso directo a portales gubernamentales y periodismo de investigación</p></div>'
+            '</div>',
+            unsafe_allow_html=True,
+        )
 
         col_m1, col_m2, col_m3 = st.columns(3)
 
         with col_m1:
-            st.markdown("#### Sector Legislativo")
-            st.info("**TV Senado (Tramitación)**\n\nDirecto desde la Sala y Comisiones.")
-            st.markdown("<a href='https://tv.senado.cl/' target='_blank' class='btn-portal'>🔴 Ir a TV Senado (Vivo)</a>", unsafe_allow_html=True)
-
-            st.info("**Cámara de Diputados**\n\nComisiones Investigadoras.")
-            st.markdown("<a href='https://webtv.camara.cl/' target='_blank' class='btn-portal'>🔴 Ir a Cámara TV (Vivo)</a>", unsafe_allow_html=True)
+            st.markdown(
+                '<div class="source-card">'
+                '<span class="badge live">EN VIVO</span>'
+                '<h4>TV Senado</h4>'
+                '<p>Transmisión directa desde la Sala y Comisiones del Senado.</p>'
+                '</div>',
+                unsafe_allow_html=True,
+            )
+            st.markdown("<a href='https://tv.senado.cl/' target='_blank' class='btn-portal'>Ir a TV Senado</a>", unsafe_allow_html=True)
+            st.markdown("<br>", unsafe_allow_html=True)
+            st.markdown(
+                '<div class="source-card">'
+                '<span class="badge live">EN VIVO</span>'
+                '<h4>Cámara de Diputados</h4>'
+                '<p>Comisiones Investigadoras en directo.</p>'
+                '</div>',
+                unsafe_allow_html=True,
+            )
+            st.markdown("<a href='https://webtv.camara.cl/' target='_blank' class='btn-portal'>Ir a Cámara TV</a>", unsafe_allow_html=True)
 
         with col_m2:
-            st.markdown("#### Noticieros y Alertas")
-            st.info("**Antofagasta TV**\n\nFoco territorial del GORE y Munis (YouTube Live nativo).")
-            st.markdown("<a href='https://www.youtube.com/@antofagastatv30/live' target='_blank' class='btn-portal'>🔴 Ir a ATV (Caso Convenios)</a>", unsafe_allow_html=True)
-
-            st.info("**TVN 24 Horas**\n\nCobertura Nacional Abierta.")
-            st.markdown("<a href='https://www.24horas.cl/envivo' target='_blank' class='btn-portal'>🔴 Ir a 24H Central</a>", unsafe_allow_html=True)
+            st.markdown(
+                '<div class="source-card">'
+                '<span class="badge live">EN VIVO</span>'
+                '<h4>Antofagasta TV</h4>'
+                '<p>Foco territorial en GORE y municipios de la región.</p>'
+                '</div>',
+                unsafe_allow_html=True,
+            )
+            st.markdown("<a href='https://www.youtube.com/@antofagastatv30/live' target='_blank' class='btn-portal'>Ver ATV</a>", unsafe_allow_html=True)
+            st.markdown("<br>", unsafe_allow_html=True)
+            st.markdown(
+                '<div class="source-card">'
+                '<span class="badge live">EN VIVO</span>'
+                '<h4>TVN 24 Horas</h4>'
+                '<p>Cobertura nacional abierta.</p>'
+                '</div>',
+                unsafe_allow_html=True,
+            )
+            st.markdown("<a href='https://www.24horas.cl/envivo' target='_blank' class='btn-portal'>Ver 24H</a>", unsafe_allow_html=True)
 
         with col_m3:
-            st.markdown("#### Periodismo Forense")
-            st.info("**CIPER Chile**\n\nCentro de Investigación Periodística.")
-            st.markdown("<a href='https://www.ciperchile.cl/' target='_blank' class='btn-portal'>📰 Leer CIPER Reportajes</a>", unsafe_allow_html=True)
-
-            st.info("**BioBio TV**\n\nAlertas preventivas por radio y TV.")
-            st.markdown("<a href='https://www.biobiochile.cl/bbtv' target='_blank' class='btn-portal'>📡 Sintonizar BioBio TV</a>", unsafe_allow_html=True)
+            st.markdown(
+                '<div class="source-card">'
+                '<span class="badge press">INVESTIGACIÓN</span>'
+                '<h4>CIPER Chile</h4>'
+                '<p>Centro de Investigación Periodística independiente.</p>'
+                '</div>',
+                unsafe_allow_html=True,
+            )
+            st.markdown("<a href='https://www.ciperchile.cl/' target='_blank' class='btn-portal'>Leer CIPER</a>", unsafe_allow_html=True)
+            st.markdown("<br>", unsafe_allow_html=True)
+            st.markdown(
+                '<div class="source-card">'
+                '<span class="badge press">MEDIOS</span>'
+                '<h4>BioBío TV</h4>'
+                '<p>Alertas preventivas por radio y televisión.</p>'
+                '</div>',
+                unsafe_allow_html=True,
+            )
+            st.markdown("<a href='https://www.biobiochile.cl/bbtv' target='_blank' class='btn-portal'>Ver BioBío</a>", unsafe_allow_html=True)
 
         # ── Nuevas fuentes de datos integradas ──
         st.markdown("---")
-        st.markdown("### 🗂️ Fuentes de Datos Integradas al Motor de Cruce")
-        st.caption("Estas fuentes se consultan automáticamente en los cruces forenses y búsqueda de personas.")
+        st.markdown(
+            '<div class="section-header">'
+            '<div class="icon green">🗂️</div>'
+            '<div><h3>Fuentes Integradas al Motor de Cruce</h3>'
+            '<p>Se consultan automáticamente en cruces forenses y búsqueda de personas</p></div>'
+            '</div>',
+            unsafe_allow_html=True,
+        )
 
         col_f1, col_f2, col_f3 = st.columns(3)
 
         with col_f1:
-            st.markdown("#### InfoProbidad")
-            st.success(
-                "**Declaraciones de Patrimonio e Intereses**\n\n"
-                "116,000+ declaraciones de funcionarios públicos: "
-                "cargo, institución, actividades económicas, bienes, "
-                "acciones en sociedades, pasivos.\n\n"
-                "**Cruce clave:** ¿El funcionario que aprobó la compra "
-                "tiene intereses en la empresa proveedora?"
-            )
             st.markdown(
-                "<a href='https://www.infoprobidad.cl' target='_blank' class='btn-portal'>"
-                "🏛️ Ir a InfoProbidad</a>",
+                '<div class="source-card">'
+                '<span class="badge data">DATOS ABIERTOS</span>'
+                '<h4>InfoProbidad</h4>'
+                '<p>116,000+ declaraciones de patrimonio e intereses de funcionarios públicos: '
+                'cargo, institución, actividades, bienes, acciones en sociedades.</p>'
+                '</div>',
                 unsafe_allow_html=True,
             )
+            st.markdown("<a href='https://www.infoprobidad.cl' target='_blank' class='btn-portal'>Ir a InfoProbidad</a>", unsafe_allow_html=True)
 
         with col_f2:
-            st.markdown("#### Contraloría (SICA)")
-            st.success(
-                "**Fiscalizaciones en Curso**\n\n"
-                "2,000+ fiscalizaciones activas: región, sector, "
-                "entidad, tipo, materia de investigación.\n\n"
-                "**Cruce clave:** ¿El organismo comprador está "
-                "actualmente bajo fiscalización de la CGR?"
-            )
             st.markdown(
-                "<a href='https://www.contraloria.cl/web/cgr/fiscalizaciones-en-curso' "
-                "target='_blank' class='btn-portal'>🔍 Ver Fiscalizaciones</a>",
+                '<div class="source-card">'
+                '<span class="badge data">DATOS ABIERTOS</span>'
+                '<h4>Contraloría (SICA)</h4>'
+                '<p>2,000+ fiscalizaciones activas: región, sector, entidad, tipo, '
+                'materia de investigación.</p>'
+                '</div>',
                 unsafe_allow_html=True,
             )
+            st.markdown("<a href='https://www.contraloria.cl/web/cgr/fiscalizaciones-en-curso' target='_blank' class='btn-portal'>Ver Fiscalizaciones</a>", unsafe_allow_html=True)
 
         with col_f3:
-            st.markdown("#### DIPRES (datos.gob.cl)")
-            st.success(
-                "**Presupuestos y Dotación**\n\n"
-                "Datos de presupuesto por institución, dotación "
-                "de personal, gastos en honorarios.\n\n"
-                "**Cruce clave:** ¿El organismo gasta más en compras "
-                "de lo que su presupuesto sugiere?"
-            )
             st.markdown(
-                "<a href='https://www.dipres.gob.cl' target='_blank' class='btn-portal'>"
-                "💰 Ir a DIPRES</a>",
+                '<div class="source-card">'
+                '<span class="badge data">DATOS ABIERTOS</span>'
+                '<h4>DIPRES (datos.gob.cl)</h4>'
+                '<p>Presupuestos por institución, dotación de personal, '
+                'gastos en honorarios y contrataciones.</p>'
+                '</div>',
                 unsafe_allow_html=True,
             )
+            st.markdown("<a href='https://www.dipres.gob.cl' target='_blank' class='btn-portal'>Ir a DIPRES</a>", unsafe_allow_html=True)
 
     # ══════════════════════════════════════════════════════════════════════════
     # PESTAÑA 5: EN LA MIRA — Alertas de Personas de Interés Público
     # ══════════════════════════════════════════════════════════════════════════
     with tab_mira:
-        st.markdown("### 🔍 Personas en la Mira")
-        st.caption(
-            "Búsqueda en 7 fuentes oficiales del Estado de Chile: InfoLobby, datos.gob.cl, "
-            "Contraloría, SERVEL, Mercado Público, InfoProbidad y Fiscalizaciones CGR. "
-            "Solo datos reales y verificables."
+        st.markdown(
+            '<div class="section-header">'
+            '<div class="icon purple">🔍</div>'
+            '<div><h3>Personas en la Mira</h3>'
+            '<p>Búsqueda en 7 fuentes oficiales: InfoLobby, datos.gob.cl, Contraloría, SERVEL, '
+            'Mercado Público, InfoProbidad y Fiscalizaciones CGR</p></div>'
+            '</div>',
+            unsafe_allow_html=True,
         )
 
         col_buscar, col_opciones = st.columns([3, 1])
@@ -1053,42 +1209,44 @@ def main():
 
                 # Tarjetas de alerta estilo Microsoft
                 border_colors = {
-                    "LOBBY": "#0078d4",
-                    "SANCIÓN": "#d13438",
-                    "DICTAMEN": "#8764b8",
-                    "COMPRA_PUBLICA": "#107c10",
-                    "APORTE_ELECTORAL": "#ff8c00",
+                    "LOBBY": "#3B82F6",
+                    "SANCIÓN": "#EF4444",
+                    "DICTAMEN": "#8B5CF6",
+                    "COMPRA_PUBLICA": "#10B981",
+                    "APORTE_ELECTORAL": "#F59E0B",
                 }
 
                 for alerta in alertas:
-                    bcolor = border_colors.get(alerta["tipo_alerta"], "#666666")
+                    bcolor = border_colors.get(alerta["tipo_alerta"], "#475569")
                     fecha_display = alerta["fecha"] if alerta["fecha"] != "sin fecha" else "—"
                     url_link = (
                         f"<a href='{alerta['url']}' target='_blank' "
-                        f"style='color:{bcolor};text-decoration:none;'>Ver fuente ↗</a>"
+                        f"style='color:{bcolor};text-decoration:none;font-size:0.8rem;font-weight:500;'>Ver fuente ↗</a>"
                         if alerta["url"] else ""
                     )
                     card_html = f"""
                     <div style="
-                        border-left: 4px solid {bcolor};
-                        background: #1e1e1e;
-                        padding: 12px 16px;
+                        border-left: 3px solid {bcolor};
+                        background: linear-gradient(135deg, rgba(15,23,42,0.6) 0%, rgba(30,41,59,0.3) 100%);
+                        padding: 14px 18px;
                         margin-bottom: 8px;
-                        border-radius: 4px;
+                        border-radius: 10px;
+                        border: 1px solid rgba(51,65,85,0.3);
+                        border-left: 3px solid {bcolor};
                     ">
                         <div style="display:flex;justify-content:space-between;align-items:center;">
-                            <span style="color:{bcolor};font-weight:600;font-size:0.85em;">
+                            <span style="color:{bcolor};font-weight:600;font-size:0.78rem;letter-spacing:0.04em;text-transform:uppercase;">
                                 {alerta['tipo_alerta']}
                             </span>
-                            <span style="color:#888;font-size:0.8em;">{fecha_display}</span>
+                            <span style="color:#475569;font-size:0.75rem;">{fecha_display}</span>
                         </div>
-                        <div style="color:#ccc;font-size:0.8em;margin-top:2px;">
+                        <div style="color:#64748B;font-size:0.75rem;margin-top:2px;font-weight:500;">
                             {alerta['fuente']}
                         </div>
-                        <div style="color:#eee;margin-top:6px;font-size:0.9em;">
+                        <div style="color:#CBD5E1;margin-top:8px;font-size:0.85rem;line-height:1.5;">
                             {alerta['descripcion']}
                         </div>
-                        <div style="margin-top:6px;">{url_link}</div>
+                        <div style="margin-top:8px;">{url_link}</div>
                     </div>
                     """
                     st.markdown(card_html, unsafe_allow_html=True)
@@ -1100,21 +1258,57 @@ def main():
     # PESTAÑA 6: INTELIGENCIA CIVIL (REPORTES Y LOBBY)
     # ══════════════════════════════════════════════════════════════════════════
     with tab_analistas:
-        st.markdown("### Radar Legislativo Oficial")
-        st.warning("Monitoreo de proyectos de ley que modifiquen normas de compras o subvenciones.")
+        st.markdown(
+            '<div class="section-header">'
+            '<div class="icon amber">📡</div>'
+            '<div><h3>Radar Legislativo</h3>'
+            '<p>Monitoreo de proyectos de ley que modifiquen normas de compras o subvenciones</p></div>'
+            '</div>',
+            unsafe_allow_html=True,
+        )
 
         col_leg1, col_leg2, col_leg3 = st.columns(3)
         with col_leg1:
-            st.info("📉 **Ley de Compras Públicas**\n\nRevisa el estado de proyectos de ley relacionados.\n\n[Buscar en Senado.cl](https://www.senado.cl/appsenado/templates/tramitacion/index.html)")
+            st.markdown(
+                '<div class="source-card">'
+                '<span class="badge data">LEGISLACIÓN</span>'
+                '<h4>Ley de Compras Públicas</h4>'
+                '<p>Estado de proyectos de ley relacionados con compras del Estado.</p>'
+                '</div>',
+                unsafe_allow_html=True,
+            )
+            st.markdown("<a href='https://www.senado.cl/appsenado/templates/tramitacion/index.html' target='_blank' class='btn-portal'>Buscar en Senado</a>", unsafe_allow_html=True)
         with col_leg2:
-            st.error("🚨 **Subvenciones y Transferencias**\n\nMonitorea cambios normativos en subvenciones públicas.\n\n[Buscar en Cámara](https://www.camara.cl/legislacion/ProyectosDeLey/proyectos_ley.aspx)")
+            st.markdown(
+                '<div class="source-card">'
+                '<span class="badge data">LEGISLACIÓN</span>'
+                '<h4>Subvenciones y Transferencias</h4>'
+                '<p>Cambios normativos en subvenciones públicas.</p>'
+                '</div>',
+                unsafe_allow_html=True,
+            )
+            st.markdown("<a href='https://www.camara.cl/legislacion/ProyectosDeLey/proyectos_ley.aspx' target='_blank' class='btn-portal'>Buscar en Cámara</a>", unsafe_allow_html=True)
         with col_leg3:
-            st.warning("🚧 **Transparencia y Probidad**\n\nSigue los proyectos de ley sobre transparencia.\n\n[Buscar en BCN](https://www.bcn.cl/leychile)")
+            st.markdown(
+                '<div class="source-card">'
+                '<span class="badge data">LEGISLACIÓN</span>'
+                '<h4>Transparencia y Probidad</h4>'
+                '<p>Proyectos de ley sobre transparencia del Estado.</p>'
+                '</div>',
+                unsafe_allow_html=True,
+            )
+            st.markdown("<a href='https://www.bcn.cl/leychile' target='_blank' class='btn-portal'>Buscar en BCN</a>", unsafe_allow_html=True)
 
-        st.markdown("---")
+        st.markdown("<div style='margin:20px 0; border-top:1px solid rgba(51,65,85,0.3);'></div>", unsafe_allow_html=True)
 
-        st.markdown("### Reportar un Hallazgo")
-        st.info("Aporta datos de posibles irregularidades para que el sistema los cruce con las bases de datos públicas.")
+        st.markdown(
+            '<div class="section-header">'
+            '<div class="icon red">📨</div>'
+            '<div><h3>Reportar un Hallazgo</h3>'
+            '<p>Aporta datos de posibles irregularidades para cruce con bases de datos públicas</p></div>'
+            '</div>',
+            unsafe_allow_html=True,
+        )
 
         with st.form("feedback_form", clear_on_submit=True):
             col_f1, col_f2 = st.columns(2)
@@ -1133,9 +1327,9 @@ def main():
             with col_f2:
                 f_dato = st.text_input("Dato Clave (OC, RUT, Apellido o Boletín Ley)")
 
-            f_comentario = st.text_area("Análisis Forense (Descripción del modus operandi / Impacto):", height=120)
+            f_comentario = st.text_area("Descripción del hallazgo:", height=120)
 
-            submit_btn = st.form_submit_button("📨 Enviar Reporte")
+            submit_btn = st.form_submit_button("Enviar Reporte", type="primary")
 
             if submit_btn:
                 if f_dato.strip() == "":
@@ -1148,8 +1342,14 @@ def main():
     # PESTAÑA 6: ASISTENTE IA (CHATBOT FORENSE)
     # ══════════════════════════════════════════════════════════════════════════
     with tab_ia:
-        st.markdown("### 🤖 Asistente de Investigación")
-        st.caption("Consulta perfiles de políticos, empresas o fundaciones. El asistente busca en la web y cruza con la base de datos.")
+        st.markdown(
+            '<div class="section-header">'
+            '<div class="icon blue">🤖</div>'
+            '<div><h3>Asistente de Investigación</h3>'
+            '<p>Consulta perfiles de políticos, empresas o fundaciones con cruce automático de datos</p></div>'
+            '</div>',
+            unsafe_allow_html=True,
+        )
 
         if "ia_messages" not in st.session_state:
             st.session_state.ia_messages = [
@@ -1262,30 +1462,29 @@ def main():
     # ─────────────────────────────────────────────────────────────────────────
     # COMPARTIR EN REDES SOCIALES
     # ─────────────────────────────────────────────────────────────────────────
-    st.markdown("---")
-    st.markdown("### Compartir hallazgos")
+    st.markdown("<div style='margin:32px 0 12px 0; border-top:1px solid rgba(51,65,85,0.3);'></div>", unsafe_allow_html=True)
 
     share_text = f"Encontré datos interesantes en Ojo del Pueblo: {total_oc:,} órdenes de compra por {format_clp(total_gasto)} bajo fiscalización ciudadana."
     encoded_text = urllib.parse.quote(share_text)
 
     col_share1, col_share2, col_share3 = st.columns(3)
     with col_share1:
-        st.markdown(f"[X / Twitter](https://twitter.com/intent/tweet?text={encoded_text})", unsafe_allow_html=True)
+        st.markdown(f"<a href='https://twitter.com/intent/tweet?text={encoded_text}' target='_blank' class='share-btn'>𝕏 Compartir en X</a>", unsafe_allow_html=True)
     with col_share2:
-        st.markdown(f"[WhatsApp](https://wa.me/?text={encoded_text})", unsafe_allow_html=True)
+        st.markdown(f"<a href='https://wa.me/?text={encoded_text}' target='_blank' class='share-btn'>💬 WhatsApp</a>", unsafe_allow_html=True)
     with col_share3:
-        st.markdown(f"[Facebook](https://www.facebook.com/sharer/sharer.php?quote={encoded_text})", unsafe_allow_html=True)
+        st.markdown(f"<a href='https://www.facebook.com/sharer/sharer.php?quote={encoded_text}' target='_blank' class='share-btn'>📘 Facebook</a>", unsafe_allow_html=True)
 
     # ─────────────────────────────────────────────────────────────────────────
-    # DISCLAIMER LEGAL Y FOOTER (Protección Anti-Demandas)
+    # DISCLAIMER LEGAL
     # ─────────────────────────────────────────────────────────────────────────
-    st.markdown("---")
+    st.markdown("<div style='margin:20px 0 12px 0; border-top:1px solid rgba(51,65,85,0.3);'></div>", unsafe_allow_html=True)
     st.markdown("""
-    <div style="font-size: 0.8rem; color: #6B7280; text-align: justify; border: 1px solid #374151; padding: 15px; border-radius: 5px; background-color: #111827;">
-    <strong>ESTATUTO LEGAL Y DESCARGO DE RESPONSABILIDAD</strong><br>
-    <em>Ojo del Pueblo</em> es una herramienta algorítmica de análisis de datos abiertos y transparencia cívica. Las alertas rojas, anomalías y cruces societarios presentados en este panel son el resultado de <strong>análisis matemáticos automatizados y algoritmos estadísticos</strong> desarrollados sobre bases de datos públicas gubernamentales (Mercado Público, SERVEL, InfoLobby).
+    <div class="footer-legal">
+    <strong>DESCARGO DE RESPONSABILIDAD</strong><br>
+    <em>Ojo del Pueblo</em> es una herramienta algorítmica de análisis de datos abiertos y transparencia cívica. Las alertas, anomalías y cruces presentados son resultado de <strong>análisis matemáticos automatizados</strong> sobre bases de datos públicas gubernamentales (Mercado Público, SERVEL, InfoLobby, InfoProbidad, Contraloría, DIPRES).
     <br><br>
-    La presencia de alertas de concentración de capital, horas inusuales o tratos directos <strong>NO constituyen una imputación ni una acusación formal de delitos</strong> (tales como fraude al fisco, colusión o cohecho). Todo análisis mostrado aquí persigue fines investigativos, educativos y de control ciudadano. Prevalece la <strong>presunción de inocencia</strong> de cualquier empresa, fundación o persona natural expuesta. Si usted observa un dato potencialmente difamatorio o erróneo en la API original del Estado, informe en la pestaña 'Inteligencia y Denuncias'.
+    La presencia de alertas <strong>no constituye una imputación ni acusación formal</strong>. Todo análisis persigue fines investigativos, educativos y de control ciudadano. Prevalece la <strong>presunción de inocencia</strong> de cualquier persona o entidad. Si detecta datos erróneos, informe en la pestaña de Denuncias.
     </div>
     """, unsafe_allow_html=True)
 

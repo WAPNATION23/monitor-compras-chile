@@ -14,7 +14,6 @@ import re
 import sqlite3
 from datetime import datetime
 
-import pandas as pd
 import requests
 from dotenv import load_dotenv
 
@@ -195,6 +194,7 @@ def _tool_executive_report() -> tuple[str, str]:
 def _tool_fiscalizaciones_cgr(prompt: str) -> tuple[str, str]:
     """Busca organismos bajo fiscalización de la Contraloría."""
     try:
+        import pandas as pd
         from contraloria_connector import ContraloriaConnector
         cgr = ContraloriaConnector(DB_PATH)
         df = cgr.cruzar_compradores_fiscalizados()

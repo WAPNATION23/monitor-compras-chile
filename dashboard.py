@@ -221,6 +221,78 @@ _CUSTOM_CSS: str = """
     #MainMenu { visibility: hidden; }
     footer { visibility: hidden; }
     header[data-testid="stHeader"] { background: transparent; }
+    /* ── Forensic Radar Cards ── */
+    .forensic-radar {
+        display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        gap: 12px; margin: 16px 0 24px 0;
+    }
+    .radar-card {
+        padding: 16px 18px; border-radius: 12px;
+        border-left: 4px solid; position: relative; overflow: hidden;
+    }
+    .radar-card.critical {
+        background: linear-gradient(135deg, rgba(239,68,68,0.08) 0%, rgba(15,23,42,0.6) 100%);
+        border-color: #EF4444;
+    }
+    .radar-card.warning {
+        background: linear-gradient(135deg, rgba(245,158,11,0.08) 0%, rgba(15,23,42,0.6) 100%);
+        border-color: #F59E0B;
+    }
+    .radar-card.info {
+        background: linear-gradient(135deg, rgba(59,130,246,0.08) 0%, rgba(15,23,42,0.6) 100%);
+        border-color: #3B82F6;
+    }
+    .radar-card.clean {
+        background: linear-gradient(135deg, rgba(16,185,129,0.08) 0%, rgba(15,23,42,0.6) 100%);
+        border-color: #10B981;
+    }
+    .radar-card .radar-number {
+        font-size: 2rem; font-weight: 800; line-height: 1;
+        margin-bottom: 4px;
+    }
+    .radar-card.critical .radar-number { color: #F87171; }
+    .radar-card.warning .radar-number { color: #FBBF24; }
+    .radar-card.info .radar-number { color: #60A5FA; }
+    .radar-card.clean .radar-number { color: #34D399; }
+    .radar-card .radar-label {
+        font-size: 0.72rem; color: #64748B; text-transform: uppercase;
+        letter-spacing: 0.06em; font-weight: 600;
+    }
+    .radar-card .radar-detail {
+        font-size: 0.78rem; color: #94A3B8; margin-top: 6px; line-height: 1.4;
+    }
+    /* ── Lead Priority Cards ── */
+    .lead-card {
+        background: linear-gradient(135deg, rgba(15,23,42,0.7) 0%, rgba(30,41,59,0.3) 100%);
+        border: 1px solid rgba(51,65,85,0.4); border-radius: 12px;
+        padding: 16px 20px; margin-bottom: 10px;
+        transition: border-color 0.2s;
+    }
+    .lead-card:hover { border-color: rgba(239,68,68,0.5); }
+    .lead-card .lead-rank {
+        display: inline-block; width: 28px; height: 28px; border-radius: 8px;
+        text-align: center; line-height: 28px; font-weight: 800; font-size: 0.85rem;
+        margin-right: 10px; flex-shrink: 0;
+    }
+    .lead-card .lead-rank.r1 { background: rgba(239,68,68,0.2); color: #F87171; }
+    .lead-card .lead-rank.r2 { background: rgba(245,158,11,0.2); color: #FBBF24; }
+    .lead-card .lead-rank.r3 { background: rgba(59,130,246,0.2); color: #60A5FA; }
+    .lead-card .lead-name {
+        font-size: 0.92rem; font-weight: 700; color: #E2E8F0;
+    }
+    .lead-card .lead-rut {
+        font-size: 0.75rem; color: #64748B; font-family: monospace;
+    }
+    .lead-card .lead-flags {
+        display: flex; flex-wrap: wrap; gap: 4px; margin-top: 8px;
+    }
+    .lead-card .lead-flag {
+        display: inline-block; padding: 2px 8px; border-radius: 6px;
+        font-size: 0.68rem; font-weight: 600;
+    }
+    .lead-flag.red { background: rgba(239,68,68,0.15); color: #F87171; }
+    .lead-flag.amber { background: rgba(245,158,11,0.15); color: #FBBF24; }
+    .lead-flag.blue { background: rgba(59,130,246,0.15); color: #60A5FA; }
 </style>
 """
 st.set_page_config(
@@ -427,6 +499,131 @@ def _render_tab_general(df_filtrado, total_gasto, total_oc, total_proveedores, t
         st.metric("Proveedores", f"{total_proveedores:,}", help="Empresas/personas que venden al Estado")
     with kpi5:
         st.metric("Organismos", f"{total_compradores:,}", help="Entidades del Estado que compran")
+
+    # ── RADAR FORENSE: Alertas automáticas ──
+    if not df_filtrado.empty:
+        # Calcular métricas forenses
+        # 1. Proveedores multigiro (venden en 3+ categorías distintas)
+        prov_cats = df_filtrado.groupby('rut_proveedor')['categoria_riesgo'].nunique()
+        n_multigiro = int((prov_cats >= 3).sum())
+
+        # 2. Proveedores que venden a 5+ organismos distintos
+        prov_orgs = df_filtrado.groupby('rut_proveedor')['rut_comprador'].nunique()
+        n_multi_org = int((prov_orgs >= 5).sum())
+
+        # 3. OC de alto valor (> $100M CLP) por trato directo
+        df_td_only = df_filtrado[df_filtrado['tipo_oc'].isin(OC_TIPO_TRATO_DIRECTO)]
+        oc_montos = df_td_only.groupby('codigo_oc')['monto_total_item'].sum()
+        n_td_alto_valor = int((oc_montos > 100_000_000).sum())
+
+        # 4. Concentración: % del gasto en top 5 proveedores
+        gasto_por_prov = df_filtrado.groupby('rut_proveedor')['monto_total_item'].sum()
+        top5_gasto = gasto_por_prov.nlargest(5).sum()
+        pct_top5 = (top5_gasto / total_gasto * 100) if total_gasto > 0 else 0
+
+        # Determinar severity
+        sev_td = "critical" if pct_td > 60 else ("warning" if pct_td > 40 else "info")
+        sev_alto = "critical" if n_td_alto_valor > 5 else ("warning" if n_td_alto_valor > 0 else "clean")
+        sev_multi = "warning" if n_multigiro > 10 else ("info" if n_multigiro > 0 else "clean")
+        sev_conc = "critical" if pct_top5 > 50 else ("warning" if pct_top5 > 30 else "info")
+
+        st.markdown(
+            f'<div class="forensic-radar">'
+            f'  <div class="radar-card {sev_td}">'
+            f'    <div class="radar-number">{pct_td:.0f}%</div>'
+            f'    <div class="radar-label">Sin Licitación Pública</div>'
+            f'    <div class="radar-detail">{n_trato_directo:,} OC sin proceso competitivo</div>'
+            f'  </div>'
+            f'  <div class="radar-card {sev_alto}">'
+            f'    <div class="radar-number">{n_td_alto_valor}</div>'
+            f'    <div class="radar-label">Trato Directo &gt;$100M</div>'
+            f'    <div class="radar-detail">OC de alto valor sin licitación</div>'
+            f'  </div>'
+            f'  <div class="radar-card {sev_multi}">'
+            f'    <div class="radar-number">{n_multigiro}</div>'
+            f'    <div class="radar-label">Proveedores Multigiro</div>'
+            f'    <div class="radar-detail">Venden en 3+ categorías distintas</div>'
+            f'  </div>'
+            f'  <div class="radar-card {sev_conc}">'
+            f'    <div class="radar-number">{pct_top5:.0f}%</div>'
+            f'    <div class="radar-label">Concentración Top 5</div>'
+            f'    <div class="radar-detail">{format_clp(top5_gasto)} en solo 5 proveedores</div>'
+            f'  </div>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+
+        # ── PRIORIDADES DE INVESTIGACIÓN ──
+        st.markdown(
+            '<div class="section-header">'
+            '<div class="icon red">🎯</div>'
+            '<div><h3>Prioridades de Investigación</h3>'
+            '<p>Leads generados automáticamente según score de riesgo compuesto</p></div>'
+            '</div>',
+            unsafe_allow_html=True,
+        )
+
+        # Build priority leads from data
+        leads = []
+        prov_stats = df_filtrado.groupby(['rut_proveedor', 'nombre_proveedor']).agg(
+            monto=('monto_total_item', 'sum'),
+            n_oc=('codigo_oc', 'nunique'),
+            n_organismos=('rut_comprador', 'nunique'),
+            n_categorias=('categoria_riesgo', 'nunique'),
+        ).reset_index()
+
+        # Add trato directo count per provider
+        td_por_prov = df_td_only.groupby('rut_proveedor')['codigo_oc'].nunique().reset_index()
+        td_por_prov.columns = ['rut_proveedor', 'n_td']
+        prov_stats = prov_stats.merge(td_por_prov, on='rut_proveedor', how='left')
+        prov_stats['n_td'] = prov_stats['n_td'].fillna(0).astype(int)
+        prov_stats['pct_td'] = (prov_stats['n_td'] / prov_stats['n_oc'] * 100).fillna(0)
+
+        # Score: weighted sum of risk factors
+        prov_stats['score'] = (
+            (prov_stats['pct_td'] / 100) * 30 +
+            (prov_stats['n_organismos'].clip(upper=10) / 10) * 25 +
+            (prov_stats['n_categorias'].clip(upper=5) / 5) * 20 +
+            (prov_stats['monto'].rank(pct=True)) * 25
+        )
+        top_leads = prov_stats.nlargest(3, 'score')
+
+        rank_classes = ['r1', 'r2', 'r3']
+        lead_html_parts = []
+        for idx, (_, lead) in enumerate(top_leads.iterrows()):
+            flags = []
+            if lead['pct_td'] > 70:
+                flags.append('<span class="lead-flag red">🚨 +70% Trato Directo</span>')
+            elif lead['pct_td'] > 40:
+                flags.append('<span class="lead-flag amber">⚠️ +40% Trato Directo</span>')
+            if lead['n_organismos'] >= 5:
+                flags.append('<span class="lead-flag amber">🕸️ Multi-organismo</span>')
+            if lead['n_categorias'] >= 3:
+                flags.append('<span class="lead-flag blue">🔄 Multigiro</span>')
+            if lead['monto'] > 500_000_000:
+                flags.append(f'<span class="lead-flag red">💰 {format_clp(lead["monto"])}</span>')
+            else:
+                flags.append(f'<span class="lead-flag blue">💰 {format_clp(lead["monto"])}</span>')
+
+            lead_html_parts.append(
+                f'<div class="lead-card">'
+                f'  <div style="display:flex;align-items:center;">'
+                f'    <span class="lead-rank {rank_classes[idx]}">{idx+1}</span>'
+                f'    <div>'
+                f'      <div class="lead-name">{html_mod.escape(str(lead["nombre_proveedor"]))}</div>'
+                f'      <div class="lead-rut">{html_mod.escape(str(lead["rut_proveedor"]))} · '
+                f'{lead["n_oc"]} OC · {lead["n_organismos"]} organismos</div>'
+                f'    </div>'
+                f'  </div>'
+                f'  <div class="lead-flags">{"".join(flags)}</div>'
+                f'</div>'
+            )
+
+        st.markdown("\n".join(lead_html_parts), unsafe_allow_html=True)
+
+        # Investigate buttons for the top 3 leads
+        inv_leads = list(zip(top_leads['nombre_proveedor'], top_leads['rut_proveedor']))
+        _investigate_buttons(inv_leads, "lead", "proveedor")
 
     st.markdown("<br>", unsafe_allow_html=True)
 

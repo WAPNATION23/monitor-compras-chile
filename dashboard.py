@@ -478,17 +478,6 @@ def _render_tab_general(df_filtrado, total_gasto, total_oc, total_proveedores, t
     # KPIs Superiores
     kpi1, kpi2, kpi3, kpi4, kpi5 = st.columns(5)
 
-    total_gasto = df_filtrado['monto_total_item'].sum() if not df_filtrado.empty else 0
-    total_oc = df_filtrado['codigo_oc'].nunique() if not df_filtrado.empty else 0
-    total_proveedores = df_filtrado['nombre_proveedor'].nunique() if not df_filtrado.empty else 0
-    total_compradores = df_filtrado['nombre_comprador'].nunique() if not df_filtrado.empty else 0
-
-    # Calcular % trato directo
-    n_trato_directo = 0
-    if not df_filtrado.empty:
-        n_trato_directo = df_filtrado[df_filtrado['tipo_oc'].isin(OC_TIPO_TRATO_DIRECTO)]['codigo_oc'].nunique()
-    pct_td = (n_trato_directo / total_oc * 100) if total_oc > 0 else 0
-
     with kpi1:
         st.metric("Gasto Escaneado", format_clp(total_gasto), help="Suma de todas las OC cargadas")
     with kpi2:
@@ -1381,10 +1370,10 @@ def _render_tab_mira(df_filtrado):
                 safe_desc = html_mod.escape(alerta.get("descripcion", ""))
                 raw_url = alerta.get("url", "")
                 # Solo permitir URLs http/https
-                safe_url = html_mod.escape(raw_url) if raw_url and raw_url.startswith(("http://", "https://")) else ""
+                safe_url = html_mod.escape(raw_url, quote=True) if raw_url and raw_url.startswith(("http://", "https://")) else ""
                 url_link = (
-                    f"<a href='{safe_url}' target='_blank' rel='noopener noreferrer' "
-                    f"style='color:{bcolor};text-decoration:none;font-size:0.8rem;font-weight:500;'>Ver fuente ↗</a>"
+                    f'<a href="{safe_url}" target="_blank" rel="noopener noreferrer" '
+                    f'style="color:{bcolor};text-decoration:none;font-size:0.8rem;font-weight:500;">Ver fuente ↗</a>'
                     if safe_url else ""
                 )
                 card_html = f"""
@@ -1550,6 +1539,7 @@ def _render_tab_ia(df_filtrado, prompt=None):
             if st.button(label, key=f"chip_{i}", use_container_width=True):
                 st.session_state["_pending_query"] = query
                 st.rerun()
+    st.markdown("</div>", unsafe_allow_html=True)
 
     # ── Definir renderer de burbujas ──
     def _render_chat_bubbles(messages: list[dict]) -> str:
@@ -1563,11 +1553,16 @@ def _render_tab_ia(df_filtrado, prompt=None):
             bubble_class = "bubble-user" if is_user else "bubble-assistant"
             label = "Tú" if is_user else "\U0001f9e0 Cerebro Forense"
             align = "text-align:right;" if is_user else "text-align:left;"
-            safe_content = html_mod.escape(msg["content"])
-            safe_content = safe_content.replace("\n", "<br>")
-            safe_content = re.sub(
-                r"\*\*(.+?)\*\*", r"<strong>\1</strong>", safe_content
-            )
+            raw = msg["content"]
+            # Convert markdown bold BEFORE escaping so ** are still literal
+            parts = re.split(r"(\*\*.+?\*\*)", raw)
+            rendered = []
+            for part in parts:
+                if part.startswith("**") and part.endswith("**"):
+                    rendered.append(f"<strong>{html_mod.escape(part[2:-2])}</strong>")
+                else:
+                    rendered.append(html_mod.escape(part))
+            safe_content = "".join(rendered).replace("\n", "<br>")
             # Indicador de herramientas usadas para respuestas del asistente
             tools_badge = ""
             if not is_user and idx in st.session_state.ia_tools_used:
@@ -1575,7 +1570,7 @@ def _render_tab_ia(df_filtrado, prompt=None):
                 badges = "".join(
                     f'<span style="display:inline-block;background:rgba(37,99,235,0.12);'
                     f'color:#2563eb;font-size:11px;padding:2px 8px;border-radius:10px;'
-                    f'margin:2px 3px 0 0;">\u26a1 {t}</span>'
+                    f'margin:2px 3px 0 0;">\u26a1 {html_mod.escape(t)}</span>'
                     for t in tools_list
                 )
                 tools_badge = f'<div style="margin-top:8px;">{badges}</div>'
@@ -1668,12 +1663,15 @@ def _render_tab_ia(df_filtrado, prompt=None):
                     from infiltrador_ia import infiltrar_rut
                     target_rut = rut_detectado.replace(".", "").strip()
                     if re.fullmatch(r"\d{7,8}-[\dkK]", target_rut):
-                        infiltrar_rut(target_rut)
-                        st.success("\u2705 Descarga histórica exitosa en la DB local.")
-                        st.session_state.ia_messages.append({
-                            "role": "system",
-                            "content": f"SISTEMA: Infiltración para {rut_detectado} completada. Historial inyectado en DB."
-                        })
+                        n_inserted = infiltrar_rut(target_rut)
+                        if n_inserted:
+                            st.success(f"\u2705 {n_inserted} registros descargados para RUT {rut_detectado}.")
+                            st.session_state.ia_messages.append({
+                                "role": "system",
+                                "content": f"SISTEMA: Infiltración para {rut_detectado} completada. {n_inserted} ítems inyectados en DB."
+                            })
+                        else:
+                            st.warning(f"\u26a0\ufe0f No se encontraron registros para RUT {rut_detectado}.")
 
             # Solo forzar rerun si la consulta vino de un botón Investigar
             # (el usuario está en otra pestaña y necesita ver el expander)

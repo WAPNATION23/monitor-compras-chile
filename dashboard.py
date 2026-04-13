@@ -1511,7 +1511,7 @@ def _render_tab_denuncias(df_filtrado):
 def _render_tab_ia(df_filtrado, prompt=None):
     st.markdown(
         '<div class="section-header">'
-        '<div class="icon blue">�</div>'
+        '<div class="icon blue">\U0001f9e0</div>'
         '<div><h3>Cerebro Forense — Asistente de Investigación</h3>'
         '<p>IA con acceso a 7 fuentes oficiales: Mercado Público, SERVEL, InfoLobby, '
         'Contraloría, InfoProbidad, DIPRES y datos.gob. Cruce automático en cada consulta.</p></div>'
@@ -1522,7 +1522,7 @@ def _render_tab_ia(df_filtrado, prompt=None):
     if "ia_messages" not in st.session_state:
         st.session_state.ia_messages = [
             {"role": "assistant", "content":
-             "**🧠 Cerebro Forense activado.**\n\n"
+             "**\U0001f9e0 Cerebro Forense activado.**\n\n"
              "Tengo acceso directo a la base de datos de órdenes de compra, "
              "aportes SERVEL, registros de lobby, declaraciones de probidad, "
              "fiscalizaciones de la Contraloría y más.\n\n"
@@ -1538,11 +1538,11 @@ def _render_tab_ia(df_filtrado, prompt=None):
         unsafe_allow_html=True,
     )
     _SUGGESTED_QUERIES = [
-        ("📊 Reporte ejecutivo", "Dame un reporte ejecutivo completo de la base de datos"),
-        ("🚨 Top sospechosos", "¿Cuáles son los proveedores más sospechosos y por qué?"),
-        ("🗳️ Cruce SERVEL", "¿Hay aportantes electorales que después ganan licitaciones?"),
-        ("🏛️ Trato directo", "¿Qué organismos abusan del trato directo?"),
-        ("🕵️ Anomalías", "Analiza todas las anomalías detectadas en la base de datos"),
+        ("\U0001f4ca Reporte ejecutivo", "Dame un reporte ejecutivo completo de la base de datos"),
+        ("\U0001f6a8 Top sospechosos", "¿Cuáles son los proveedores más sospechosos y por qué?"),
+        ("\U0001f5f3\ufe0f Cruce SERVEL", "¿Hay aportantes electorales que después ganan licitaciones?"),
+        ("\U0001f3db\ufe0f Trato directo", "¿Qué organismos abusan del trato directo?"),
+        ("\U0001f575\ufe0f Anomalías", "Analiza todas las anomalías detectadas en la base de datos"),
     ]
     col_chips = st.columns(len(_SUGGESTED_QUERIES))
     for i, (label, query) in enumerate(_SUGGESTED_QUERIES):
@@ -1551,7 +1551,7 @@ def _render_tab_ia(df_filtrado, prompt=None):
                 st.session_state["_pending_query"] = query
                 st.rerun()
 
-    # ── Renderizar historial como burbujas ──
+    # ── Definir renderer de burbujas ──
     def _render_chat_bubbles(messages: list[dict]) -> str:
         """Genera HTML de burbujas de chat con indicadores de herramientas."""
         html_parts = []
@@ -1561,7 +1561,7 @@ def _render_tab_ia(df_filtrado, prompt=None):
             is_user = msg["role"] == "user"
             row_class = "chat-row-user" if is_user else "chat-row-assistant"
             bubble_class = "bubble-user" if is_user else "bubble-assistant"
-            label = "Tú" if is_user else "🧠 Cerebro Forense"
+            label = "Tú" if is_user else "\U0001f9e0 Cerebro Forense"
             align = "text-align:right;" if is_user else "text-align:left;"
             safe_content = html_mod.escape(msg["content"])
             safe_content = safe_content.replace("\n", "<br>")
@@ -1575,7 +1575,7 @@ def _render_tab_ia(df_filtrado, prompt=None):
                 badges = "".join(
                     f'<span style="display:inline-block;background:rgba(37,99,235,0.12);'
                     f'color:#2563eb;font-size:11px;padding:2px 8px;border-radius:10px;'
-                    f'margin:2px 3px 0 0;">⚡ {t}</span>'
+                    f'margin:2px 3px 0 0;">\u26a1 {t}</span>'
                     for t in tools_list
                 )
                 tools_badge = f'<div style="margin-top:8px;">{badges}</div>'
@@ -1588,18 +1588,13 @@ def _render_tab_ia(df_filtrado, prompt=None):
             )
         return "\n".join(html_parts)
 
-    chat_html = _render_chat_bubbles(st.session_state.ia_messages)
-    st.markdown(
-        f'<div class="chat-container" id="chat-scroll">{chat_html}</div>'
-        '<script>var c=document.getElementById("chat-scroll");'
-        'if(c)c.scrollTop=c.scrollHeight;</script>',
-        unsafe_allow_html=True,
-    )
+    # ── Placeholder para el chat (se llena después del procesamiento) ──
+    chat_placeholder = st.empty()
 
+    # ── Rate limit ──
     if "api_calls" not in st.session_state:
         st.session_state.api_calls = 0
 
-    # Rate limit por IP
     try:
         headers = st.context.headers
         user_ip = headers.get("X-Forwarded-For", headers.get("Host", "local")).split(",")[0].strip()
@@ -1611,50 +1606,44 @@ def _render_tab_ia(df_filtrado, prompt=None):
 
     daily_limit = DAILY_QUERY_LIMIT
     remaining = max(0, daily_limit - daily_used)
-    st.caption(f"🔋 Consultas restantes hoy: **{remaining}**/{daily_limit}")
 
-    # Capturar prompt desde chip o desde parámetro (chat_input vive en main)
+    # ── Procesar prompt ANTES de renderizar chat ──
     pending = st.session_state.pop("_pending_query", None)
-    prompt = pending or prompt
+    effective_prompt = pending or prompt
 
-    if prompt:
+    if effective_prompt:
         if remaining <= 0:
-            st.error(f"🛑 Límite diario alcanzado ({daily_limit} consultas). Vuelve mañana.")
+            st.error(f"\U0001f6d1 Límite diario alcanzado ({daily_limit} consultas). Vuelve mañana.")
         else:
             st.session_state.api_calls += 1
             increment_rate_limit_usage(user_ip, today_str)
-            st.session_state.ia_messages.append({"role": "user", "content": prompt})
+            st.session_state.ia_messages.append({"role": "user", "content": effective_prompt})
 
             api_key = os.getenv("DEEPSEEK_API_KEY", "")
             if not api_key:
-                revelacion = "⚠️ Asistente IA no disponible: falta la clave DEEPSEEK_API_KEY en .env"
+                revelacion = "\u26a0\ufe0f Asistente IA no disponible: falta la clave DEEPSEEK_API_KEY en .env"
                 tools_used = []
             else:
                 try:
-                    # 1. Clasificar intención
-                    intents = classify_intent(prompt)
-                    intent_labels = {"persona": "👤 Persona", "proveedor": "🏢 Proveedor",
-                                     "organismo": "🏛️ Organismo", "anomalia": "🚨 Anomalía",
-                                     "resumen": "📊 Resumen", "general": "🔎 General"}
+                    intents = classify_intent(effective_prompt)
+                    intent_labels = {"persona": "\U0001f464 Persona", "proveedor": "\U0001f3e2 Proveedor",
+                                     "organismo": "\U0001f3db\ufe0f Organismo", "anomalia": "\U0001f6a8 Anomalía",
+                                     "resumen": "\U0001f4ca Resumen", "general": "\U0001f50e General"}
                     detected = ", ".join(intent_labels.get(i, i) for i in intents)
-                    st.toast(f"Intención detectada: {detected}", icon="🎯")
+                    st.toast(f"Intención detectada: {detected}", icon="\U0001f3af")
 
-                    # 2. Ejecutar herramientas forenses
-                    st.toast("Ejecutando herramientas forenses...", icon="⚡")
-                    forensic_context, tools_used = build_forensic_context(prompt)
+                    st.toast("Ejecutando herramientas forenses...", icon="\u26a1")
+                    forensic_context, tools_used = build_forensic_context(effective_prompt)
 
-                    # 3. Buscar en DB local
-                    st.toast("Escaneando base de datos local...", icon="🔍")
-                    db_context = build_db_context(prompt)
+                    st.toast("Escaneando base de datos local...", icon="\U0001f50d")
+                    db_context = build_db_context(effective_prompt)
                     tools_used.append("DB Local")
 
-                    # 4. Buscar en la web
-                    st.toast("Buscando información en la web...", icon="🌐")
-                    web_context = build_web_context(prompt)
+                    st.toast("Buscando información en la web...", icon="\U0001f310")
+                    web_context = build_web_context(effective_prompt)
                     tools_used.append("Web OSINT")
 
-                    # 5. Enviar a DeepSeek con todo el contexto
-                    st.toast("Analizando con Cerebro Forense...", icon="🧠")
+                    st.toast("Analizando con Cerebro Forense...", icon="\U0001f9e0")
                     revelacion = call_deepseek(
                         st.session_state.ia_messages, web_context, db_context,
                         forensic_context
@@ -1664,34 +1653,44 @@ def _render_tab_ia(df_filtrado, prompt=None):
                     tools_used = []
                     logger.error("Error en chat IA: %s", ia_exc)
 
-            # Interceptar comando de infiltración
             infil_match = re.search(r"\[EJECUTAR_INFILTRACION:\s*([\d\.\-Kk]+)\]", revelacion)
             clean_response = revelacion.replace(infil_match.group(0) if infil_match else "", "")
 
             st.session_state.ia_messages.append({"role": "assistant", "content": clean_response})
-            # Guardar herramientas usadas para badge visual
             msg_idx = len(st.session_state.ia_messages) - 1
             if tools_used:
                 st.session_state.ia_tools_used[msg_idx] = tools_used
 
             if infil_match:
                 rut_detectado = infil_match.group(1)
-                st.warning(f"⚡ DESCARGA AUTOMÁTICA DE HISTORIAL PARA RUT: {rut_detectado}")
+                st.warning(f"\u26a1 DESCARGA AUTOMÁTICA DE HISTORIAL PARA RUT: {rut_detectado}")
                 with st.spinner("Consultando registros públicos de Mercado Público vía API..."):
                     from infiltrador_ia import infiltrar_rut
                     target_rut = rut_detectado.replace(".", "").strip()
                     if re.fullmatch(r"\d{7,8}-[\dkK]", target_rut):
                         infiltrar_rut(target_rut)
-                        st.success("✅ Descarga histórica exitosa en la DB local.")
+                        st.success("\u2705 Descarga histórica exitosa en la DB local.")
                         st.session_state.ia_messages.append({
                             "role": "system",
                             "content": f"SISTEMA: Infiltración para {rut_detectado} completada. Historial inyectado en DB."
                         })
 
-            st.session_state["_show_ia_response"] = True
-            st.rerun()
+            # Solo forzar rerun si la consulta vino de un botón Investigar
+            # (el usuario está en otra pestaña y necesita ver el expander)
+            if pending:
+                st.session_state["_show_ia_response"] = True
+                st.rerun()
 
+    # ── Renderizar chat (ahora incluye mensajes nuevos si se procesó un prompt) ──
+    chat_html = _render_chat_bubbles(st.session_state.ia_messages)
+    chat_placeholder.markdown(
+        f'<div class="chat-container" id="chat-scroll">{chat_html}</div>'
+        '<script>var c=document.getElementById("chat-scroll");'
+        'if(c)c.scrollTop=c.scrollHeight;</script>',
+        unsafe_allow_html=True,
+    )
 
+    st.caption(f"\U0001f50b Consultas restantes hoy: **{remaining}**/{daily_limit}")
 
 
 def main():
@@ -1861,10 +1860,6 @@ def main():
     # ENRUTAMIENTO POR PESTAÑAS (Limpieza Visual)
     # ─────────────────────────────────────────────────────────────────────────
 
-    # Detectar si hay una consulta pendiente para la IA
-    _has_pending = "_pending_query" in st.session_state
-
-    # Determinar pestaña por defecto (switch automático al tab IA si hay query pendiente)
     tab_names = [
         "Panel General",
         "Cruces Forenses",
@@ -1874,9 +1869,6 @@ def main():
         "Denuncias",
         "🧠 Asistente IA",
     ]
-
-    if _has_pending:
-        st.info("🧠 **Procesando consulta…** — La respuesta aparecerá aquí en un momento.", icon="🔍")
 
     # Mostrar última respuesta de la IA (visible desde cualquier pestaña)
     if st.session_state.pop("_show_ia_response", False):
@@ -1908,10 +1900,8 @@ def main():
     with tab_analistas:
         _render_tab_denuncias(df_filtrado)
 
-    # chat_input DEBE vivir fuera de tabs (restricción de Streamlit)
-    ia_prompt = st.chat_input("¿Qué quieres investigar? (persona, empresa, organismo, anomalías...)")
-
     with tab_ia:
+        ia_prompt = st.chat_input("¿Qué quieres investigar? (persona, empresa, organismo, anomalías...)")
         _render_tab_ia(df_filtrado, prompt=ia_prompt)
 
     # ─────────────────────────────────────────────────────────────────────────

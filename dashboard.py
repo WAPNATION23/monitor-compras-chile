@@ -6,6 +6,7 @@ Construido con Streamlit.
 import logging
 import html as html_mod
 import os
+from pathlib import Path
 import re
 import sqlite3
 import urllib.parse
@@ -1912,11 +1913,19 @@ def main():
             unsafe_allow_html=True,
         )
 
-    # VERIFICACIÓN DE BD — auto-crear si no existe
+    # VERIFICACIÓN DE BD — restaurar seed comprimido si no existe
     if not os.path.exists(DB_PATH):
-        from processor import DataProcessor
-        DataProcessor()  # crea tabla + índices
-        logger.info("Base de datos creada automáticamente: %s", DB_PATH)
+        import gzip
+        import shutil
+        seed = Path(__file__).parent / "seed.db.gz"
+        if seed.exists():
+            with gzip.open(seed, "rb") as f_in, open(DB_PATH, "wb") as f_out:
+                shutil.copyfileobj(f_in, f_out)
+            logger.info("Base de datos restaurada desde seed: %s", DB_PATH)
+        else:
+            from processor import DataProcessor
+            DataProcessor()
+            logger.info("Base de datos creada vacía: %s", DB_PATH)
 
     # CARGA DE DATOS
     try:

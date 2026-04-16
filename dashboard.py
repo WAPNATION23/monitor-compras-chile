@@ -548,13 +548,6 @@ def _render_caso_destacado(df: pd.DataFrame):
             WHERE LOWER(nombre_comprador) LIKE '%secretar%general%presidencia%'
         """, conn)
 
-        # Recurring provider
-        genesis = pd.read_sql_query("""
-            SELECT COUNT(DISTINCT codigo_oc) as n_oc, SUM(monto_total_item) as total
-            FROM ordenes_items
-            WHERE LOWER(nombre_proveedor) LIKE '%genesis%janeth%laya%'
-        """, conn)
-
         conn.close()
     except Exception:
         return  # Silently skip if DB issue
@@ -568,8 +561,6 @@ def _render_caso_destacado(df: pd.DataFrame):
     n_oc_segpres = int(stats['n_oc'] or 0)
     total_segpres = int(stats['total'] or 0)
     pct_sin_lic = (stats['total_sin_lic'] / stats['total'] * 100) if stats['total'] else 0
-    n_genesis = int(genesis.iloc[0]['n_oc'] or 0) if not genesis.empty else 0
-    total_genesis = int(genesis.iloc[0]['total'] or 0) if not genesis.empty else 0
 
     st.markdown(
         '<div class="section-header">'
@@ -628,17 +619,20 @@ def _render_caso_destacado(df: pd.DataFrame):
 
     st.markdown('</div>', unsafe_allow_html=True)
 
-    # Investigate buttons
-    if n_genesis > 0:
+    # Investigate buttons — derived from actual query results
+    top_prov = provs.head(1)
+    if not top_prov.empty:
+        p0 = top_prov.iloc[0]
         col_inv1, col_inv2 = st.columns(2)
         with col_inv1:
             _investigate_buttons(
-                [("GENESIS JANETH LAYA GONZALEZ", "77103803-4")],
+                [(str(p0['nombre_proveedor']), str(p0['rut_proveedor']))],
                 "caso_prov", "proveedor"
             )
         with col_inv2:
+            # Use the buying org name from the SEGPRES query
             _investigate_buttons(
-                [("Ministerio Sec. Gral. de la Presidencia", "1051173")],
+                [("Secretaría General de la Presidencia", "")],
                 "caso_org", "organismo"
             )
 
@@ -1498,7 +1492,7 @@ def _render_tab_mira(df_filtrado):
     with col_buscar:
         mira_nombre = st.text_input(
             "Nombre de la persona",
-            placeholder="Ej: Camila Flores, Juan Pérez...",
+            placeholder="Nombre completo o parcial",
             key="mira_nombre_input",
         )
     with col_opciones:

@@ -26,8 +26,8 @@ Plataforma open source que extrae, procesa y analiza órdenes de compra del Merc
 | Asistente IA (DeepSeek) | **Experimental** | Chat con búsqueda web + consulta local a DB. Requiere API key |
 | Notificador Telegram | **Experimental** | Envío de alertas automáticas. Requiere bot token |
 | Cruce SERVEL (donaciones) | **Operativo** | Carga CSV real desde servel.cl, cruce con proveedores activo |
-| Cruce malla societaria | **Demo** | Lógica implementada, requiere scraper real del Diario Oficial |
-| Scraper InfoLobby | **Demo** | Conector esqueleto, API no disponible públicamente |
+| Cruce malla societaria | **Pendiente** | Lógica implementada, requiere scraper real del Diario Oficial |
+| Scraper InfoLobby | **Pendiente** | Conector esqueleto, API no disponible públicamente |
 
 ---
 

@@ -293,6 +293,57 @@ _CUSTOM_CSS: str = """
     .lead-flag.red { background: rgba(239,68,68,0.15); color: #F87171; }
     .lead-flag.amber { background: rgba(245,158,11,0.15); color: #FBBF24; }
     .lead-flag.blue { background: rgba(59,130,246,0.15); color: #60A5FA; }
+
+    /* Caso Destacado */
+    .caso-banner {
+        background: linear-gradient(135deg, rgba(239,68,68,0.10) 0%, rgba(245,158,11,0.08) 50%, rgba(15,23,42,0.95) 100%);
+        border: 1px solid rgba(239,68,68,0.25);
+        border-left: 4px solid #EF4444;
+        border-radius: 12px;
+        padding: 20px 24px;
+        margin: 24px 0 16px 0;
+    }
+    .caso-banner h4 {
+        color: #F87171; font-size: 1.05rem; margin: 0 0 4px 0;
+    }
+    .caso-banner .caso-sub {
+        color: #94A3B8; font-size: 0.78rem; margin-bottom: 14px;
+    }
+    .caso-hallazgo {
+        display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 10px;
+    }
+    .caso-stat {
+        flex: 1 1 140px;
+        background: rgba(15,23,42,0.6);
+        border: 1px solid rgba(51,65,85,0.4);
+        border-radius: 8px;
+        padding: 12px 14px;
+        text-align: center;
+    }
+    .caso-stat .caso-num {
+        font-size: 1.3rem; font-weight: 800; color: #F87171;
+    }
+    .caso-stat .caso-label {
+        font-size: 0.68rem; color: #64748B; text-transform: uppercase;
+        letter-spacing: 0.04em; margin-top: 2px;
+    }
+    .caso-proveedor {
+        background: rgba(15,23,42,0.5);
+        border: 1px solid rgba(51,65,85,0.3);
+        border-radius: 8px;
+        padding: 10px 14px;
+        margin-top: 8px;
+        display: flex; justify-content: space-between; align-items: center;
+    }
+    .caso-proveedor .prov-name {
+        font-weight: 600; color: #E2E8F0; font-size: 0.82rem;
+    }
+    .caso-proveedor .prov-detail {
+        font-size: 0.72rem; color: #64748B; font-family: monospace;
+    }
+    .caso-proveedor .prov-monto {
+        font-weight: 700; color: #FBBF24; font-size: 0.88rem;
+    }
 </style>
 """
 st.set_page_config(
@@ -468,6 +519,130 @@ def _investigate_buttons(entities: list[tuple[str, str]], prefix: str, entity_ty
                 st.rerun()
 
 
+def _render_caso_destacado(df: pd.DataFrame):
+    """Render a featured investigation case based on real DB data."""
+    # Query SEGPRES catering data
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        # Catering OCs from SEGPRES
+        catering = pd.read_sql_query("""
+            SELECT codigo_oc, nombre_proveedor, rut_proveedor, nombre_producto,
+                   SUM(monto_total_item) as total, tipo_oc, fecha_creacion
+            FROM ordenes_items
+            WHERE LOWER(nombre_comprador) LIKE '%secretar%general%presidencia%'
+              AND (LOWER(nombre_producto) LIKE '%cater%'
+                OR LOWER(nombre_producto) LIKE '%event%'
+                OR LOWER(nombre_producto) LIKE '%coctel%'
+                OR LOWER(nombre_producto) LIKE '%comida%'
+                OR LOWER(nombre_producto) LIKE '%coffee%')
+            GROUP BY codigo_oc
+            ORDER BY fecha_creacion DESC
+        """, conn)
+
+        # SEGPRES summary
+        segpres_stats = pd.read_sql_query("""
+            SELECT COUNT(DISTINCT codigo_oc) as n_oc,
+                   SUM(monto_total_item) as total,
+                   SUM(CASE WHEN tipo_oc IN ('TD','SE') THEN monto_total_item ELSE 0 END) as total_sin_lic
+            FROM ordenes_items
+            WHERE LOWER(nombre_comprador) LIKE '%secretar%general%presidencia%'
+        """, conn)
+
+        # Recurring provider
+        genesis = pd.read_sql_query("""
+            SELECT COUNT(DISTINCT codigo_oc) as n_oc, SUM(monto_total_item) as total
+            FROM ordenes_items
+            WHERE LOWER(nombre_proveedor) LIKE '%genesis%janeth%laya%'
+        """, conn)
+
+        conn.close()
+    except Exception:
+        return  # Silently skip if DB issue
+
+    if catering.empty or segpres_stats.empty:
+        return
+
+    stats = segpres_stats.iloc[0]
+    n_catering = len(catering)
+    total_catering = int(catering['total'].sum())
+    n_oc_segpres = int(stats['n_oc'])
+    total_segpres = int(stats['total'])
+    pct_sin_lic = (stats['total_sin_lic'] / stats['total'] * 100) if stats['total'] > 0 else 0
+    n_genesis = int(genesis.iloc[0]['n_oc']) if not genesis.empty else 0
+    total_genesis = int(genesis.iloc[0]['total']) if not genesis.empty else 0
+
+    st.markdown(
+        '<div class="section-header">'
+        '<div class="icon red">📂</div>'
+        '<div><h3>Caso Destacado</h3>'
+        '<p>Investigación generada automáticamente desde datos reales de Mercado Público</p></div>'
+        '</div>',
+        unsafe_allow_html=True,
+    )
+
+    st.markdown(
+        f'<div class="caso-banner">'
+        f'  <h4>🏛️ SEGPRES — La Moneda: Catering, Eventos y Gasto Sin Licitación</h4>'
+        f'  <div class="caso-sub">Secretaría General de la Presidencia · {n_oc_segpres} órdenes de compra en base de datos</div>'
+        f'  <div class="caso-hallazgo">'
+        f'    <div class="caso-stat">'
+        f'      <div class="caso-num">{format_clp(total_segpres)}</div>'
+        f'      <div class="caso-label">Gasto total SEGPRES</div>'
+        f'    </div>'
+        f'    <div class="caso-stat">'
+        f'      <div class="caso-num">{pct_sin_lic:.0f}%</div>'
+        f'      <div class="caso-label">Sin licitación pública</div>'
+        f'    </div>'
+        f'    <div class="caso-stat">'
+        f'      <div class="caso-num">{n_catering}</div>'
+        f'      <div class="caso-label">OC de catering/eventos</div>'
+        f'    </div>'
+        f'    <div class="caso-stat">'
+        f'      <div class="caso-num">{format_clp(total_catering)}</div>'
+        f'      <div class="caso-label">En comida y eventos</div>'
+        f'    </div>'
+        f'  </div>',
+        unsafe_allow_html=True,
+    )
+
+    # Show top catering providers
+    provs = catering.groupby(['nombre_proveedor', 'rut_proveedor']).agg(
+        total=('total', 'sum'), n_oc=('codigo_oc', 'nunique')
+    ).reset_index().sort_values('total', ascending=False).head(4)
+
+    for _, p in provs.iterrows():
+        name_safe = html_mod.escape(str(p['nombre_proveedor'])[:50])
+        rut_safe = html_mod.escape(str(p['rut_proveedor']))
+        is_recurrente = p['n_oc'] >= 3
+        badge = ' · <span style="color:#F87171;font-weight:700;">⚠ RECURRENTE</span>' if is_recurrente else ''
+        st.markdown(
+            f'<div class="caso-proveedor">'
+            f'  <div>'
+            f'    <div class="prov-name">{name_safe}</div>'
+            f'    <div class="prov-detail">{rut_safe} · {int(p["n_oc"])} OC{badge}</div>'
+            f'  </div>'
+            f'  <div class="prov-monto">{format_clp(int(p["total"]))}</div>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+
+    st.markdown('</div>', unsafe_allow_html=True)
+
+    # Investigate buttons
+    if n_genesis > 0:
+        col_inv1, col_inv2 = st.columns(2)
+        with col_inv1:
+            _investigate_buttons(
+                [("GENESIS JANETH LAYA GONZALEZ", "77103803-4")],
+                "caso_prov", "proveedor"
+            )
+        with col_inv2:
+            _investigate_buttons(
+                [("Ministerio Sec. Gral. de la Presidencia", "1051173")],
+                "caso_org", "organismo"
+            )
+
+
 def _render_tab_general(df_filtrado, total_gasto, total_oc, total_proveedores, total_compradores, pct_td, n_trato_directo):
     # Explicación clara del panel
     st.markdown("""
@@ -613,6 +788,11 @@ def _render_tab_general(df_filtrado, total_gasto, total_oc, total_proveedores, t
         # Investigate buttons for the top 3 leads
         inv_leads = list(zip(top_leads['nombre_proveedor'], top_leads['rut_proveedor']))
         _investigate_buttons(inv_leads, "lead", "proveedor")
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    # ── CASO DESTACADO ──
+    _render_caso_destacado(df_filtrado)
 
     st.markdown("<br>", unsafe_allow_html=True)
 

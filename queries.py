@@ -23,7 +23,7 @@ def load_data() -> pd.DataFrame:
 
             query = """
                 SELECT
-                    codigo_oc, nombre_producto, cantidad, precio_unitario,
+                    codigo_oc, nombre_producto, categoria, cantidad, precio_unitario,
                     monto_total_item, nombre_comprador, nombre_proveedor,
                     rut_proveedor, rut_comprador,
                     fecha_creacion, estado,

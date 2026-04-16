@@ -20,9 +20,8 @@ Thumbs.db
 .env
 *.env
 
-# Datos locales
-# La BD seed se incluye en el repo para Streamlit Cloud.
-# auditoria_estado.db  ← ahora se versiona como seed
+# Datos locales — la BD se genera con `py main.py` (no se versiona)
+auditoria_estado.db
 *.db-journal
 
 # Archivos temporales de test

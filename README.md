@@ -60,7 +60,7 @@ TELEGRAM_CHAT_ID=tu_chat_id
 ### Uso
 
 ```bash
-# Extraer datos del día (default: ayer, hasta 5000 OC)
+# Primera ejecución: crea la BD y extrae datos reales
 py main.py
 
 # Extraer con límite custom
@@ -78,6 +78,10 @@ py backup.py --restore backups/archivo.db
 # Lanzar dashboard
 streamlit run dashboard.py
 ```
+
+> **Nota:** `auditoria_estado.db` es un artefacto local generado por el pipeline.
+> No se versiona en git. Si clonas el repo, ejecuta `py main.py` o usa el botón
+> "Extraer datos" en el dashboard para poblar la base.
 
 ---
 

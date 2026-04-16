@@ -1918,14 +1918,11 @@ def main():
             unsafe_allow_html=True,
         )
 
-    # VERIFICACIÓN DE BD
+    # VERIFICACIÓN DE BD — auto-crear si no existe
     if not os.path.exists(DB_PATH):
-        st.error("🚫 Base de datos no encontrada.")
-        st.info(
-            "Ejecuta el pipeline para crear la base de datos:\n\n"
-            "```bash\npython main.py\n```"
-        )
-        st.stop()
+        from processor import DataProcessor
+        DataProcessor()  # crea tabla + índices
+        logger.info("Base de datos creada automáticamente: %s", DB_PATH)
 
     # CARGA DE DATOS
     try:

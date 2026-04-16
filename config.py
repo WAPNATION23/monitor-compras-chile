@@ -53,7 +53,8 @@ if not API_TICKET:
     )
 
 # ──────────────────────────── Base de datos ────────────────────────────────── #
-DB_NAME: str = "auditoria_estado.db"
+_BASE_DIR = Path(__file__).resolve().parent
+DB_NAME: str = str(_BASE_DIR / "auditoria_estado.db")
 
 # ──────────────────────────── Parámetros de Red ────────────────────────────── #
 REQUEST_TIMEOUT: int = 30          # segundos

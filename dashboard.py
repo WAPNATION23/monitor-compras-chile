@@ -1917,15 +1917,17 @@ def main():
     if not os.path.exists(DB_PATH):
         import gzip
         import shutil
-        seed = Path(__file__).parent / "seed.db.gz"
+        _base = Path(__file__).resolve().parent
+        seed = _base / "seed.db.gz"
+        logger.info("DB no encontrada en %s — buscando seed en %s", DB_PATH, seed)
         if seed.exists():
             with gzip.open(seed, "rb") as f_in, open(DB_PATH, "wb") as f_out:
                 shutil.copyfileobj(f_in, f_out)
-            logger.info("Base de datos restaurada desde seed: %s", DB_PATH)
+            logger.info("Base de datos restaurada desde seed: %s (%d bytes)", DB_PATH, os.path.getsize(DB_PATH))
         else:
             from processor import DataProcessor
             DataProcessor()
-            logger.info("Base de datos creada vacía: %s", DB_PATH)
+            logger.info("Seed no encontrado — base de datos creada vacía: %s", DB_PATH)
 
     # CARGA DE DATOS
     try:

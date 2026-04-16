@@ -115,7 +115,7 @@ def _tool_anomaly_scan(prompt: str) -> tuple[str, str]:
             for _, row in df_susp.head(10).iterrows():
                 lines.append(
                     f"- {row.get('nombre_proveedor', '?')} (RUT: {row.get('rut_proveedor', '?')}) | "
-                    f"Score: {row.get('score_riesgo', 0):.1f} | "
+                    f"Score: {row.get('score_sospecha', 0):.1f} | "
                     f"Monto: ${row.get('monto_total', 0):,.0f} CLP"
                 )
 
@@ -126,20 +126,21 @@ def _tool_anomaly_scan(prompt: str) -> tuple[str, str]:
             for _, row in df_org.head(5).iterrows():
                 lines.append(
                     f"- {row.get('nombre_comprador', '?')} | "
-                    f"Score: {row.get('score_riesgo', 0):.1f} | "
-                    f"% Trato Directo: {row.get('pct_trato_directo', 0):.0f}%"
+                    f"Score Riesgo: {row.get('score_riesgo', 0):.1f} | "
+                    f"OC: {row.get('n_ordenes', 0)} | "
+                    f"Monto: ${row.get('monto_total', 0):,.0f} CLP"
                 )
 
         # Abuso de trato directo
         df_td = xref.ratio_tratos_directos()
         if not df_td.empty:
-            top_td = df_td[df_td["ratio_td"] > 0.8].head(5)
+            top_td = df_td[df_td["ratio_td"] > 80].head(5)
             if not top_td.empty:
                 lines.append("\n**ORGANISMOS CON >80% TRATO DIRECTO:**")
                 for _, row in top_td.iterrows():
                     lines.append(
                         f"- {row.get('nombre_comprador', '?')} | "
-                        f"Ratio TD: {row.get('ratio_td', 0):.0%} | "
+                        f"TD: {row.get('ratio_td', 0):.0f}% | "
                         f"N={row.get('n_trato_directo', 0)}/{row.get('n_total', 0)}"
                     )
 

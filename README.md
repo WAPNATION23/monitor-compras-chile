@@ -10,7 +10,7 @@
 
 Plataforma open source que extrae, procesa y analiza órdenes de compra del Mercado Público (ChileCompra) para detectar anomalías estadísticas en el gasto estatal. Pensada para periodistas de investigación, organizaciones de la sociedad civil y ciudadanos interesados en transparencia.
 
-> **Beta pública**: El sistema funciona y está auditado, pero sigue en desarrollo activo.
+> **Beta pública**: Sistema funcional en desarrollo activo, con suite de 89 tests automatizados.
 > Reporta bugs, sugiere mejoras y ayuda a validar datos reales.
 > Ver [CONTRIBUTING.md](CONTRIBUTING.md) para empezar.
 
@@ -119,7 +119,7 @@ Estas limitaciones están documentadas como issues abiertos para mejora continua
 py -m pytest tests/test_core.py -q
 ```
 
-65 tests cubriendo: procesador (ETL, deduplicación, migración de esquema, validación RUT), detector (IQR, Z-score, Benford), cross_referencer (concentración, rankings, SERVEL), notificador (anti-spam, dedup, truncación), extractor (retry, max_oc), chat service (errores DB, timeout, rate limit), configuración, backup (create/restore/list).
+89 tests cubriendo: procesador (ETL, deduplicación, migración de esquema, validación RUT), detector (IQR, Z-score, Benford), cross_referencer (concentración, rankings, SERVEL), notificador (anti-spam, dedup, truncación), extractor (retry, max_oc), chat service (errores DB, timeout, rate limit), dashboard (KPIs, filtros, formato CLP, radar forense), configuración, backup (create/restore/list).
 
 ---
 

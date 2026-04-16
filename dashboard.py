@@ -565,11 +565,11 @@ def _render_caso_destacado(df: pd.DataFrame):
     stats = segpres_stats.iloc[0]
     n_catering = len(catering)
     total_catering = int(catering['total'].sum())
-    n_oc_segpres = int(stats['n_oc'])
-    total_segpres = int(stats['total'])
-    pct_sin_lic = (stats['total_sin_lic'] / stats['total'] * 100) if stats['total'] > 0 else 0
-    n_genesis = int(genesis.iloc[0]['n_oc']) if not genesis.empty else 0
-    total_genesis = int(genesis.iloc[0]['total']) if not genesis.empty else 0
+    n_oc_segpres = int(stats['n_oc'] or 0)
+    total_segpres = int(stats['total'] or 0)
+    pct_sin_lic = (stats['total_sin_lic'] / stats['total'] * 100) if stats['total'] else 0
+    n_genesis = int(genesis.iloc[0]['n_oc'] or 0) if not genesis.empty else 0
+    total_genesis = int(genesis.iloc[0]['total'] or 0) if not genesis.empty else 0
 
     st.markdown(
         '<div class="section-header">'
@@ -668,7 +668,7 @@ def _render_tab_general(df_filtrado, total_gasto, total_oc, total_proveedores, t
     if not df_filtrado.empty:
         # Calcular métricas forenses
         # 1. Proveedores multigiro (venden en 3+ categorías distintas)
-        prov_cats = df_filtrado.groupby('rut_proveedor')['categoria_riesgo'].nunique()
+        prov_cats = df_filtrado.groupby('rut_proveedor')['categoria'].nunique()
         n_multigiro = int((prov_cats >= 3).sum())
 
         # 2. Proveedores que venden a 5+ organismos distintos
@@ -733,7 +733,7 @@ def _render_tab_general(df_filtrado, total_gasto, total_oc, total_proveedores, t
             monto=('monto_total_item', 'sum'),
             n_oc=('codigo_oc', 'nunique'),
             n_organismos=('rut_comprador', 'nunique'),
-            n_categorias=('categoria_riesgo', 'nunique'),
+            n_categorias=('categoria', 'nunique'),
         ).reset_index()
 
         # Add trato directo count per provider
@@ -1228,7 +1228,7 @@ def _render_tab_cruces(df_filtrado, total_proveedores, total_compradores, n_trat
                             ]
                             if palabras:
                                 busqueda = " ".join(palabras[:2])
-                                cruces = ip.cruzar_con_proveedor(busqueda)
+                                cruces = ip.cruzar_con_proveedor(busqueda) or []
                                 for c in cruces:
                                     c["proveedor_buscado"] = nombre_prov
                                     c["gasto_total_proveedor"] = prov["gasto_total"]
@@ -1676,6 +1676,105 @@ def _render_tab_denuncias(df_filtrado):
     # PESTAÑA 6: ASISTENTE IA (CHATBOT FORENSE)
 
 
+def _process_ia_query(effective_prompt: str, *, is_from_button: bool = False):
+    """Run AI processing for a query. Works from any tab context."""
+    if "ia_messages" not in st.session_state:
+        st.session_state.ia_messages = [
+            {"role": "assistant", "content":
+             "**\U0001f9e0 Cerebro Forense activado.**\n\n"
+             "Tengo acceso directo a la base de datos de órdenes de compra, "
+             "aportes SERVEL, registros de lobby, declaraciones de probidad, "
+             "fiscalizaciones de la Contraloría y más.\n\n"
+             "Puedo investigar **personas**, **empresas**, **organismos** o "
+             "ejecutar **análisis de anomalías** completos. ¿Qué necesitas?"}
+        ]
+    if "ia_tools_used" not in st.session_state:
+        st.session_state.ia_tools_used = {}
+    if "api_calls" not in st.session_state:
+        st.session_state.api_calls = 0
+
+    try:
+        headers = st.context.headers
+        user_ip = headers.get("X-Forwarded-For", headers.get("Host", "local")).split(",")[0].strip()
+    except (AttributeError, KeyError):
+        user_ip = "local"
+
+    today_str = datetime.now().strftime("%Y-%m-%d")
+    daily_used = get_rate_limit_usage(user_ip, today_str)
+    daily_limit = DAILY_QUERY_LIMIT
+    remaining = max(0, daily_limit - daily_used)
+
+    if remaining <= 0:
+        st.error(f"\U0001f6d1 Límite diario alcanzado ({daily_limit} consultas). Vuelve mañana.")
+        return
+
+    st.session_state.api_calls += 1
+    increment_rate_limit_usage(user_ip, today_str)
+    st.session_state.ia_messages.append({"role": "user", "content": effective_prompt})
+
+    api_key = os.getenv("DEEPSEEK_API_KEY", "")
+    if not api_key:
+        revelacion = "\u26a0\ufe0f Asistente IA no disponible: falta la clave DEEPSEEK_API_KEY en .env"
+        tools_used: list[str] = []
+    else:
+        try:
+            intents = classify_intent(effective_prompt)
+            intent_labels = {"persona": "\U0001f464 Persona", "proveedor": "\U0001f3e2 Proveedor",
+                             "organismo": "\U0001f3db\ufe0f Organismo", "anomalia": "\U0001f6a8 Anomalía",
+                             "resumen": "\U0001f4ca Resumen", "general": "\U0001f50e General"}
+            detected = ", ".join(intent_labels.get(i, i) for i in intents)
+            st.toast(f"Intención detectada: {detected}", icon="\U0001f3af")
+
+            st.toast("Ejecutando herramientas forenses...", icon="\u26a1")
+            forensic_context, tools_used = build_forensic_context(effective_prompt)
+
+            st.toast("Escaneando base de datos local...", icon="\U0001f50d")
+            db_context = build_db_context(effective_prompt)
+            tools_used.append("DB Local")
+
+            st.toast("Buscando información en la web...", icon="\U0001f310")
+            web_context = build_web_context(effective_prompt)
+            tools_used.append("Web OSINT")
+
+            st.toast("Analizando con Cerebro Forense...", icon="\U0001f9e0")
+            revelacion = call_deepseek(
+                st.session_state.ia_messages, web_context, db_context,
+                forensic_context
+            )
+        except (requests.RequestException, KeyError, ValueError) as ia_exc:
+            revelacion = f"Error al consultar el asistente IA: {ia_exc}"
+            tools_used = []
+            logger.error("Error en chat IA: %s", ia_exc)
+
+    infil_match = re.search(r"\[EJECUTAR_INFILTRACION:\s*([\d\.\-Kk]+)\]", revelacion)
+    clean_response = revelacion.replace(infil_match.group(0) if infil_match else "", "")
+
+    st.session_state.ia_messages.append({"role": "assistant", "content": clean_response})
+    msg_idx = len(st.session_state.ia_messages) - 1
+    if tools_used:
+        st.session_state.ia_tools_used[msg_idx] = tools_used
+
+    if infil_match:
+        rut_detectado = infil_match.group(1)
+        st.warning(f"\u26a1 DESCARGA AUTOMÁTICA DE HISTORIAL PARA RUT: {rut_detectado}")
+        with st.spinner("Consultando registros públicos de Mercado Público vía API..."):
+            from infiltrador_ia import infiltrar_rut
+            target_rut = rut_detectado.replace(".", "").strip()
+            if re.fullmatch(r"\d{7,8}-[\dkK]", target_rut):
+                n_inserted = infiltrar_rut(target_rut)
+                if n_inserted:
+                    st.success(f"\u2705 {n_inserted} registros descargados para RUT {rut_detectado}.")
+                    st.session_state.ia_messages.append({
+                        "role": "system",
+                        "content": f"SISTEMA: Infiltración para {rut_detectado} completada. {n_inserted} ítems inyectados en DB."
+                    })
+                else:
+                    st.warning(f"\u26a0\ufe0f No se encontraron registros para RUT {rut_detectado}.")
+
+    if is_from_button:
+        st.session_state["_show_ia_response"] = True
+        st.rerun()
+
 
 def _render_tab_ia(df_filtrado, prompt=None):
     st.markdown(
@@ -1782,82 +1881,9 @@ def _render_tab_ia(df_filtrado, prompt=None):
     daily_limit = DAILY_QUERY_LIMIT
     remaining = max(0, daily_limit - daily_used)
 
-    # ── Procesar prompt ANTES de renderizar chat ──
-    pending = st.session_state.pop("_pending_query", None)
-    effective_prompt = pending or prompt
-
-    if effective_prompt:
-        if remaining <= 0:
-            st.error(f"\U0001f6d1 Límite diario alcanzado ({daily_limit} consultas). Vuelve mañana.")
-        else:
-            st.session_state.api_calls += 1
-            increment_rate_limit_usage(user_ip, today_str)
-            st.session_state.ia_messages.append({"role": "user", "content": effective_prompt})
-
-            api_key = os.getenv("DEEPSEEK_API_KEY", "")
-            if not api_key:
-                revelacion = "\u26a0\ufe0f Asistente IA no disponible: falta la clave DEEPSEEK_API_KEY en .env"
-                tools_used = []
-            else:
-                try:
-                    intents = classify_intent(effective_prompt)
-                    intent_labels = {"persona": "\U0001f464 Persona", "proveedor": "\U0001f3e2 Proveedor",
-                                     "organismo": "\U0001f3db\ufe0f Organismo", "anomalia": "\U0001f6a8 Anomalía",
-                                     "resumen": "\U0001f4ca Resumen", "general": "\U0001f50e General"}
-                    detected = ", ".join(intent_labels.get(i, i) for i in intents)
-                    st.toast(f"Intención detectada: {detected}", icon="\U0001f3af")
-
-                    st.toast("Ejecutando herramientas forenses...", icon="\u26a1")
-                    forensic_context, tools_used = build_forensic_context(effective_prompt)
-
-                    st.toast("Escaneando base de datos local...", icon="\U0001f50d")
-                    db_context = build_db_context(effective_prompt)
-                    tools_used.append("DB Local")
-
-                    st.toast("Buscando información en la web...", icon="\U0001f310")
-                    web_context = build_web_context(effective_prompt)
-                    tools_used.append("Web OSINT")
-
-                    st.toast("Analizando con Cerebro Forense...", icon="\U0001f9e0")
-                    revelacion = call_deepseek(
-                        st.session_state.ia_messages, web_context, db_context,
-                        forensic_context
-                    )
-                except (requests.RequestException, KeyError, ValueError) as ia_exc:
-                    revelacion = f"Error al consultar el asistente IA: {ia_exc}"
-                    tools_used = []
-                    logger.error("Error en chat IA: %s", ia_exc)
-
-            infil_match = re.search(r"\[EJECUTAR_INFILTRACION:\s*([\d\.\-Kk]+)\]", revelacion)
-            clean_response = revelacion.replace(infil_match.group(0) if infil_match else "", "")
-
-            st.session_state.ia_messages.append({"role": "assistant", "content": clean_response})
-            msg_idx = len(st.session_state.ia_messages) - 1
-            if tools_used:
-                st.session_state.ia_tools_used[msg_idx] = tools_used
-
-            if infil_match:
-                rut_detectado = infil_match.group(1)
-                st.warning(f"\u26a1 DESCARGA AUTOMÁTICA DE HISTORIAL PARA RUT: {rut_detectado}")
-                with st.spinner("Consultando registros públicos de Mercado Público vía API..."):
-                    from infiltrador_ia import infiltrar_rut
-                    target_rut = rut_detectado.replace(".", "").strip()
-                    if re.fullmatch(r"\d{7,8}-[\dkK]", target_rut):
-                        n_inserted = infiltrar_rut(target_rut)
-                        if n_inserted:
-                            st.success(f"\u2705 {n_inserted} registros descargados para RUT {rut_detectado}.")
-                            st.session_state.ia_messages.append({
-                                "role": "system",
-                                "content": f"SISTEMA: Infiltración para {rut_detectado} completada. {n_inserted} ítems inyectados en DB."
-                            })
-                        else:
-                            st.warning(f"\u26a0\ufe0f No se encontraron registros para RUT {rut_detectado}.")
-
-            # Solo forzar rerun si la consulta vino de un botón Investigar
-            # (el usuario está en otra pestaña y necesita ver el expander)
-            if pending:
-                st.session_state["_show_ia_response"] = True
-                st.rerun()
+    # ── Procesar prompt del chat_input (los _pending_query ya se procesan en main()) ──
+    if prompt:
+        _process_ia_query(prompt)
 
     # ── Renderizar chat (ahora incluye mensajes nuevos si se procesó un prompt) ──
     chat_html = _render_chat_bubbles(st.session_state.ia_messages)
@@ -2055,6 +2081,13 @@ def main():
             with st.expander("🧠 Respuesta del Cerebro Forense", expanded=True):
                 st.markdown(_ia_msgs[-1]["content"])
                 st.caption("💡 Puedes ver el historial completo en la pestaña **🧠 Asistente IA**.")
+
+    # Procesar _pending_query ANTES de las pestañas (los botones 🔍 lo setean
+    # desde cualquier pestaña; si lo procesamos dentro de tab_ia nunca se ejecuta
+    # cuando el usuario está en otra pestaña).
+    _pending = st.session_state.pop("_pending_query", None)
+    if _pending:
+        _process_ia_query(_pending, is_from_button=True)
 
     tab_estadisticas, tab_cruce, tab_registro, tab_medios, tab_mira, tab_analistas, tab_ia = st.tabs(tab_names)
 

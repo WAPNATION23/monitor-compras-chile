@@ -145,9 +145,9 @@ _CUSTOM_CSS: str = """
     .stTabs [data-baseweb="tab"] {
         background: transparent; border: none;
         border-bottom: 2px solid transparent;
-        padding: 10px 16px; transition: all 0.2s ease; color: #64748B;
+        padding: 10px 18px; transition: all 0.2s ease; color: #64748B;
         font-weight: 600; border-radius: 0;
-        font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.06em;
+        font-size: 0.82rem; text-transform: uppercase; letter-spacing: 0.06em;
         white-space: nowrap;
     }
     .stTabs [data-baseweb="tab"]:hover { color: #94A3B8; }
@@ -361,11 +361,11 @@ st.markdown(_CUSTOM_CSS, unsafe_allow_html=True)
 # CONFIGURACIONES Y CONSTANTES
 # ─────────────────────────────────────────────────────────────────────────
 EMOJIS_RIESGO = {
-    "MUNICIPALIDAD": "🏛️",
-    "FUERZAS ARMADAS/ORDEN": "🚓",
-    "ALERTA FUNDACIONES/TRATO DIRECTO": "🚨💰",
-    "MOP/OBRAS": "🚧",
-    "GENERAL": "📄"
+    "MUNICIPALIDAD": "■",
+    "FUERZAS ARMADAS/ORDEN": "■",
+    "ALERTA FUNDACIONES/TRATO DIRECTO": "■",
+    "MOP/OBRAS": "■",
+    "GENERAL": "■"
 }
 
 # Paleta profesional de análisis
@@ -511,7 +511,7 @@ def _investigate_buttons(entities: list[tuple[str, str]], prefix: str, entity_ty
     for i, (name, rut) in enumerate(entities[:5]):
         with cols[i]:
             label = name[:22] + "…" if len(name) > 22 else name
-            if st.button(f"🔍 {label}", key=f"inv_{prefix}_{i}", use_container_width=True):
+            if st.button(f"Investigar · {label}", key=f"inv_{prefix}_{i}", use_container_width=True):
                 if entity_type == "proveedor":
                     query = f"Investiga al proveedor {name} (RUT {rut}): ¿tiene anomalías, vínculos políticos, fiscalizaciones o aportes electorales?"
                 else:
@@ -574,7 +574,7 @@ def _render_caso_destacado(df: pd.DataFrame):
 
     st.markdown(
         f'<div class="caso-banner">'
-        f'  <h4>🏛️ SEGPRES — La Moneda: Catering, Eventos y Gasto Sin Licitación</h4>'
+        f'  <h4>SEGPRES — La Moneda: catering, eventos y gasto sin licitación</h4>'
         f'  <div class="caso-sub">Secretaría General de la Presidencia · {n_oc_segpres} órdenes de compra en base de datos</div>'
         f'  <div class="caso-hallazgo">'
         f'    <div class="caso-stat">'
@@ -606,7 +606,7 @@ def _render_caso_destacado(df: pd.DataFrame):
         name_safe = html_mod.escape(str(p['nombre_proveedor'])[:50])
         rut_safe = html_mod.escape(str(p['rut_proveedor']))
         is_recurrente = p['n_oc'] >= 3
-        badge = ' · <span style="color:#F87171;font-weight:700;">⚠ RECURRENTE</span>' if is_recurrente else ''
+        badge = ' · <span style="color:#F87171;font-weight:700;letter-spacing:0.04em;">RECURRENTE</span>' if is_recurrente else ''
         st.markdown(
             f'<div class="caso-proveedor">'
             f'  <div>'
@@ -752,17 +752,17 @@ def _render_tab_general(df_filtrado, total_gasto, total_oc, total_proveedores, t
         for idx, (_, lead) in enumerate(top_leads.iterrows()):
             flags = []
             if lead['pct_td'] > 70:
-                flags.append('<span class="lead-flag red">🚨 +70% Trato Directo</span>')
+                flags.append('<span class="lead-flag red">Trato directo &gt;70%</span>')
             elif lead['pct_td'] > 40:
-                flags.append('<span class="lead-flag amber">⚠️ +40% Trato Directo</span>')
+                flags.append('<span class="lead-flag amber">Trato directo &gt;40%</span>')
             if lead['n_organismos'] >= 5:
-                flags.append('<span class="lead-flag amber">🕸️ Multi-organismo</span>')
+                flags.append('<span class="lead-flag amber">Multi-organismo</span>')
             if lead['n_categorias'] >= 3:
-                flags.append('<span class="lead-flag blue">🔄 Multigiro</span>')
+                flags.append('<span class="lead-flag blue">Multigiro</span>')
             if lead['monto'] > 500_000_000:
-                flags.append(f'<span class="lead-flag red">💰 {format_clp(lead["monto"])}</span>')
+                flags.append(f'<span class="lead-flag red">{format_clp(lead["monto"])}</span>')
             else:
-                flags.append(f'<span class="lead-flag blue">💰 {format_clp(lead["monto"])}</span>')
+                flags.append(f'<span class="lead-flag blue">{format_clp(lead["monto"])}</span>')
 
             lead_html_parts.append(
                 f'<div class="lead-card">'
@@ -956,7 +956,7 @@ def _render_tab_cruces(df_filtrado, total_proveedores, total_compradores, n_trat
         # ── Reporte Ejecutivo ──
         reporte = xref.reporte_ejecutivo()
         if reporte:
-            with st.expander("📊 Reporte Ejecutivo — Resumen de la Base de Datos", expanded=False):
+            with st.expander("Reporte ejecutivo — resumen de la base de datos", expanded=False):
                 re1, re2, re3, re4 = st.columns(4)
                 re1.metric("Total OC", f"{reporte.get('total_ordenes', 0):,}")
                 re2.metric("Monto Total", format_clp_full(reporte.get('monto_total_clp', 0)))
@@ -993,7 +993,7 @@ def _render_tab_cruces(df_filtrado, total_proveedores, total_compradores, n_trat
                 # Botón descarga del ranking
                 csv_sosp = df_sosp.to_csv(index=False).encode('utf-8')
                 st.download_button(
-                    "📥 Descargar ranking", csv_sosp,
+                    "Descargar ranking (CSV)", csv_sosp,
                     file_name=f"proveedores_sospechosos_{datetime.now().strftime('%Y%m%d')}.csv",
                     mime="text/csv", key="dl_sosp"
                 )
@@ -1087,7 +1087,7 @@ def _render_tab_cruces(df_filtrado, total_proveedores, total_compradores, n_trat
             df_servel_cruzado['retorno_licitaciones'] = df_servel_cruzado['retorno_licitaciones'].apply(format_clp_full)
             st.dataframe(df_servel_cruzado, hide_index=True, use_container_width=True)
         else:
-            st.info("🛡️ Nivel 0 de corrupción detectado o matriz limpia bajo este filtro. (Asegúrate de haber procesado SERVEL).")
+            st.info("Sin coincidencias entre aportes SERVEL y adjudicaciones bajo el filtro actual.")
 
         st.markdown("---")
         st.markdown("#### Malla Societaria — Beneficiarios Finales")
@@ -1133,11 +1133,11 @@ def _render_tab_cruces(df_filtrado, total_proveedores, total_compradores, n_trat
                         df_cruce_personas['donacion_total_servel'] = df_cruce_personas['donacion_total_servel'].apply(format_clp_full)
                     st.dataframe(df_cruce_personas, hide_index=True, use_container_width=True)
                     st.warning(
-                        f"⚠️ {len(df_cruce_personas)} proveedores con anomalías detectadas "
-                        "Y vínculos políticos confirmados."
+                        f"Se identificaron {len(df_cruce_personas)} proveedores con anomalías "
+                        "y vínculos políticos registrados."
                     )
                 else:
-                    st.info("🛡️ Ningún proveedor anómalo tiene vínculos SERVEL/Lobby detectados (o las fuentes no están cargadas).")
+                    st.info("Sin vínculos detectados entre proveedores anómalos y registros SERVEL/Lobby.")
             except Exception as exc:
                 logger.warning("Error en cruce anomalías→personas: %s", exc)
                 st.info("Cruce anomalías→personas no disponible. El detector puede tardar con datasets grandes.")
@@ -1166,13 +1166,13 @@ def _render_tab_cruces(df_filtrado, total_proveedores, total_compradores, n_trat
                     df_fisc['gasto_total'] = df_fisc['gasto_total'].apply(format_clp_full)
                     st.dataframe(df_fisc, hide_index=True, use_container_width=True)
                     st.warning(
-                        f"⚠️ {df_fisc['nombre_comprador'].nunique()} organismos compradores "
-                        "están bajo fiscalización activa de la CGR."
+                        f"Organismos compradores bajo fiscalización activa de la CGR: "
+                        f"{df_fisc['nombre_comprador'].nunique()}."
                     )
                 else:
-                    st.info("🛡️ Sin coincidencias con el filtro actual.")
+                    st.info("Sin coincidencias con el filtro actual.")
             else:
-                st.info("🛡️ Sin datos de fiscalizaciones cargados. Ejecuta el conector de Contraloría primero.")
+                st.info("Sin datos de fiscalizaciones cargados. Ejecuta el conector de Contraloría primero.")
         except ImportError:
             st.info("Conector de Contraloría no disponible.")
         except Exception as exc:
@@ -1234,11 +1234,11 @@ def _render_tab_cruces(df_filtrado, total_proveedores, total_compradores, n_trat
                     df_conflictos['gasto_total_proveedor'] = df_conflictos['gasto_total_proveedor'].apply(format_clp_full)
                     st.dataframe(df_conflictos, hide_index=True, use_container_width=True)
                     st.error(
-                        f"🚨 {len(conflictos)} posibles conflictos de interés detectados. "
-                        "Funcionarios con vínculos declarados a proveedores del Estado."
+                        f"Se detectaron {len(conflictos)} posibles conflictos de interés: "
+                        "funcionarios con vínculos declarados a proveedores del Estado."
                     )
                 else:
-                    st.info("🛡️ Sin conflictos de interés detectados en los top 20 proveedores.")
+                    st.info("Sin conflictos de interés detectados en los 20 proveedores principales.")
             else:
                 st.info("Sin proveedores en la base de datos para cruzar.")
         except ImportError:
@@ -1285,7 +1285,7 @@ def _render_tab_datos(df_filtrado, filtro_global):
             # Botón de descarga
             csv_oc = dt_display.to_csv(index=False).encode('utf-8')
             st.download_button(
-                "📥 Descargar datos OC (CSV)", csv_oc,
+                "Descargar OC (CSV)", csv_oc,
                 file_name=f"ordenes_compra_{datetime.now().strftime('%Y%m%d')}.csv",
                 mime="text/csv"
             )
@@ -1334,7 +1334,7 @@ def _render_tab_datos(df_filtrado, filtro_global):
 
                 csv_lic = df_lic.to_csv(index=False).encode('utf-8')
                 st.download_button(
-                    "📥 Descargar licitaciones (CSV)", csv_lic,
+                    "Descargar licitaciones (CSV)", csv_lic,
                     file_name=f"licitaciones_{datetime.now().strftime('%Y%m%d')}.csv",
                     mime="text/csv"
                 )
@@ -1499,7 +1499,7 @@ def _render_tab_mira(df_filtrado):
     with col_opciones:
         mira_incluir_compras = st.checkbox("Incluir Mercado Público", value=False, key="mira_compras")
 
-    mira_buscar = st.button("🔎 Buscar alertas", key="mira_buscar_btn", type="primary")
+    mira_buscar = st.button("Buscar alertas", key="mira_buscar_btn", type="primary")
 
     if mira_buscar and mira_nombre.strip():
         motor = AlertasPersonas()
@@ -1517,14 +1517,17 @@ def _render_tab_mira(df_filtrado):
 
             # Métricas rápidas
             cols_metricas = st.columns(min(len(tipos_encontrados), 5))
+            label_map = {
+                "LOBBY": "Lobby",
+                "SANCIÓN": "Sanción",
+                "DICTAMEN": "Dictamen",
+                "COMPRA_PUBLICA": "Compra pública",
+                "APORTE_ELECTORAL": "Aporte electoral",
+            }
             for i, tipo in enumerate(tipos_encontrados[:5]):
                 count = sum(1 for a in alertas if a["tipo_alerta"] == tipo)
-                color_map = {
-                    "LOBBY": "🤝", "SANCIÓN": "⚖️", "DICTAMEN": "📜",
-                    "COMPRA_PUBLICA": "🛒", "APORTE_ELECTORAL": "🗳️",
-                }
-                icono = color_map.get(tipo, "📋")
-                cols_metricas[i].metric(f"{icono} {tipo}", count)
+                label = label_map.get(tipo, tipo.replace("_", " ").title())
+                cols_metricas[i].metric(label, count)
 
             st.markdown("---")
 
@@ -1643,14 +1646,14 @@ def _render_tab_denuncias(df_filtrado):
         col_f1, col_f2 = st.columns(2)
         with col_f1:
             f_tipo = st.selectbox(
-                "Categoría del Hallazgo / Alerta",
+                "Categoría del hallazgo",
                 [
-                 "Desfalco / Sobreprecio Sistemático",
-                 "Proyecto de Ley Oculto / Lobby Directo",
-                 "Tráfico de Influencias / Favores Políticos",
-                 "Fraccionamiento (Licitación evadida)",
-                 "Horario Vampiro (De Madrugada)",
-                 "Empresa de Cartón / Giro dudoso",
+                 "Sobreprecio / Sobrecosto sistemático",
+                 "Proyecto de ley sin transparencia / Lobby directo",
+                 "Tráfico de influencias / Conflicto de interés",
+                 "Fraccionamiento (licitación evadida)",
+                 "Contratación en horario no hábil (alto monto)",
+                 "Empresa de fachada / giro dudoso",
                  ]
             )
         with col_f2:
@@ -1662,10 +1665,10 @@ def _render_tab_denuncias(df_filtrado):
 
         if submit_btn:
             if f_dato.strip() == "":
-                st.error("❌ Debes incluir al menos un dato clave (OC, RUT o nombre).")
+                st.error("Debes incluir al menos un dato clave (OC, RUT o nombre).")
             else:
                 save_feedback(f_tipo, f_dato, f_comentario)
-                st.success(f"✅ Reporte sobre '{f_dato}' registrado correctamente.")
+                st.success(f"Reporte sobre '{f_dato}' registrado correctamente.")
 
     # ══════════════════════════════════════════════════════════════════════════
     # PESTAÑA 6: ASISTENTE IA (CHATBOT FORENSE)
@@ -1676,10 +1679,10 @@ def _process_ia_query(effective_prompt: str, *, is_from_button: bool = False):
     if "ia_messages" not in st.session_state:
         st.session_state.ia_messages = [
             {"role": "assistant", "content":
-             "**\U0001f9e0 Cerebro Forense activado.**\n\n"
+             "**Cerebro Forense activado.**\n\n"
              "Tengo acceso directo a la base de datos de órdenes de compra, "
              "aportes SERVEL, registros de lobby, declaraciones de probidad, "
-             "fiscalizaciones de la Contraloría y más.\n\n"
+             "fiscalizaciones de la Contraloría y fuentes web.\n\n"
              "Puedo investigar **personas**, **empresas**, **organismos** o "
              "ejecutar **análisis de anomalías** completos. ¿Qué necesitas?"}
         ]
@@ -1700,7 +1703,7 @@ def _process_ia_query(effective_prompt: str, *, is_from_button: bool = False):
     remaining = max(0, daily_limit - daily_used)
 
     if remaining <= 0:
-        st.error(f"\U0001f6d1 Límite diario alcanzado ({daily_limit} consultas). Vuelve mañana.")
+        st.error(f"Límite diario alcanzado ({daily_limit} consultas). Vuelve mañana.")
         return
 
     st.session_state.api_calls += 1
@@ -1709,29 +1712,29 @@ def _process_ia_query(effective_prompt: str, *, is_from_button: bool = False):
 
     api_key = os.getenv("DEEPSEEK_API_KEY", "")
     if not api_key:
-        revelacion = "\u26a0\ufe0f Asistente IA no disponible: falta la clave DEEPSEEK_API_KEY en .env"
+        revelacion = "Asistente IA no disponible: falta la clave DEEPSEEK_API_KEY en .env"
         tools_used: list[str] = []
     else:
         try:
             intents = classify_intent(effective_prompt)
-            intent_labels = {"persona": "\U0001f464 Persona", "proveedor": "\U0001f3e2 Proveedor",
-                             "organismo": "\U0001f3db\ufe0f Organismo", "anomalia": "\U0001f6a8 Anomalía",
-                             "resumen": "\U0001f4ca Resumen", "general": "\U0001f50e General"}
+            intent_labels = {"persona": "Persona", "proveedor": "Proveedor",
+                             "organismo": "Organismo", "anomalia": "Anomalía",
+                             "resumen": "Resumen", "general": "General"}
             detected = ", ".join(intent_labels.get(i, i) for i in intents)
-            st.toast(f"Intención detectada: {detected}", icon="\U0001f3af")
+            st.toast(f"Intención detectada: {detected}")
 
-            st.toast("Ejecutando herramientas forenses...", icon="\u26a1")
+            st.toast("Ejecutando herramientas forenses...")
             forensic_context, tools_used = build_forensic_context(effective_prompt)
 
-            st.toast("Escaneando base de datos local...", icon="\U0001f50d")
+            st.toast("Escaneando base de datos local...")
             db_context = build_db_context(effective_prompt)
             tools_used.append("DB Local")
 
-            st.toast("Buscando información en la web...", icon="\U0001f310")
+            st.toast("Buscando información en la web...")
             web_context = build_web_context(effective_prompt)
             tools_used.append("Web OSINT")
 
-            st.toast("Analizando con Cerebro Forense...", icon="\U0001f9e0")
+            st.toast("Analizando con Cerebro Forense...")
             revelacion = call_deepseek(
                 st.session_state.ia_messages, web_context, db_context,
                 forensic_context
@@ -1751,20 +1754,20 @@ def _process_ia_query(effective_prompt: str, *, is_from_button: bool = False):
 
     if infil_match:
         rut_detectado = infil_match.group(1)
-        st.warning(f"\u26a1 DESCARGA AUTOMÁTICA DE HISTORIAL PARA RUT: {rut_detectado}")
+        st.warning(f"Descarga automática de historial para RUT {rut_detectado}")
         with st.spinner("Consultando registros públicos de Mercado Público vía API..."):
             from infiltrador_ia import infiltrar_rut
             target_rut = rut_detectado.replace(".", "").strip()
             if re.fullmatch(r"\d{7,8}-[\dkK]", target_rut):
                 n_inserted = infiltrar_rut(target_rut)
                 if n_inserted:
-                    st.success(f"\u2705 {n_inserted} registros descargados para RUT {rut_detectado}.")
+                    st.success(f"{n_inserted} registros descargados para RUT {rut_detectado}.")
                     st.session_state.ia_messages.append({
                         "role": "system",
                         "content": f"SISTEMA: Infiltración para {rut_detectado} completada. {n_inserted} ítems inyectados en DB."
                     })
                 else:
-                    st.warning(f"\u26a0\ufe0f No se encontraron registros para RUT {rut_detectado}.")
+                    st.warning(f"No se encontraron registros para RUT {rut_detectado}.")
 
     if is_from_button:
         st.session_state["_show_ia_response"] = True
@@ -1774,7 +1777,7 @@ def _process_ia_query(effective_prompt: str, *, is_from_button: bool = False):
 def _render_tab_ia(df_filtrado, prompt=None):
     st.markdown(
         '<div class="section-header">'
-        '<div class="icon blue">\U0001f9e0</div>'
+        '<div class="icon blue">IA</div>'
         '<div><h3>Cerebro Forense — Asistente de Investigación</h3>'
         '<p>IA con acceso a 7 fuentes oficiales: Mercado Público, SERVEL, InfoLobby, '
         'Contraloría, InfoProbidad, DIPRES y datos.gob. Cruce automático en cada consulta.</p></div>'
@@ -1785,10 +1788,10 @@ def _render_tab_ia(df_filtrado, prompt=None):
     if "ia_messages" not in st.session_state:
         st.session_state.ia_messages = [
             {"role": "assistant", "content":
-             "**\U0001f9e0 Cerebro Forense activado.**\n\n"
+             "**Cerebro Forense activado.**\n\n"
              "Tengo acceso directo a la base de datos de órdenes de compra, "
              "aportes SERVEL, registros de lobby, declaraciones de probidad, "
-             "fiscalizaciones de la Contraloría y más.\n\n"
+             "fiscalizaciones de la Contraloría y fuentes web.\n\n"
              "Puedo investigar **personas**, **empresas**, **organismos** o "
              "ejecutar **análisis de anomalías** completos. ¿Qué necesitas?"}
         ]
@@ -1801,11 +1804,11 @@ def _render_tab_ia(df_filtrado, prompt=None):
         unsafe_allow_html=True,
     )
     _SUGGESTED_QUERIES = [
-        ("\U0001f4ca Reporte ejecutivo", "Dame un reporte ejecutivo completo de la base de datos"),
-        ("\U0001f6a8 Top sospechosos", "¿Cuáles son los proveedores más sospechosos y por qué?"),
-        ("\U0001f5f3\ufe0f Cruce SERVEL", "¿Hay aportantes electorales que después ganan licitaciones?"),
-        ("\U0001f3db\ufe0f Trato directo", "¿Qué organismos abusan del trato directo?"),
-        ("\U0001f575\ufe0f Anomalías", "Analiza todas las anomalías detectadas en la base de datos"),
+        ("Reporte ejecutivo", "Dame un reporte ejecutivo completo de la base de datos"),
+        ("Top sospechosos", "¿Cuáles son los proveedores más sospechosos y por qué?"),
+        ("Cruce SERVEL", "¿Hay aportantes electorales que después ganan licitaciones?"),
+        ("Trato directo", "¿Qué organismos abusan del trato directo?"),
+        ("Anomalías", "Analiza todas las anomalías detectadas en la base de datos"),
     ]
     col_chips = st.columns(len(_SUGGESTED_QUERIES))
     for i, (label, query) in enumerate(_SUGGESTED_QUERIES):
@@ -1825,7 +1828,7 @@ def _render_tab_ia(df_filtrado, prompt=None):
             is_user = msg["role"] == "user"
             row_class = "chat-row-user" if is_user else "chat-row-assistant"
             bubble_class = "bubble-user" if is_user else "bubble-assistant"
-            label = "Tú" if is_user else "\U0001f9e0 Cerebro Forense"
+            label = "Tú" if is_user else "Cerebro Forense"
             align = "text-align:right;" if is_user else "text-align:left;"
             raw = msg["content"]
             # Convert markdown bold BEFORE escaping so ** are still literal
@@ -1889,7 +1892,7 @@ def _render_tab_ia(df_filtrado, prompt=None):
         unsafe_allow_html=True,
     )
 
-    st.caption(f"\U0001f50b Consultas restantes hoy: **{remaining}**/{daily_limit}")
+    st.caption(f"Consultas restantes hoy: **{remaining}**/{daily_limit}")
 
 
 def main():
@@ -2082,18 +2085,18 @@ def main():
         "Cruces Forenses",
         "Datos Crudos",
         "Fuentes",
-        "🔍 En la Mira",
+        "En la Mira",
         "Denuncias",
-        "🧠 Asistente IA",
+        "Asistente IA",
     ]
 
     # Mostrar última respuesta de la IA (visible desde cualquier pestaña)
     if st.session_state.pop("_show_ia_response", False):
         _ia_msgs = st.session_state.get("ia_messages", [])
         if _ia_msgs and _ia_msgs[-1]["role"] == "assistant":
-            with st.expander("🧠 Respuesta del Cerebro Forense", expanded=True):
+            with st.expander("Respuesta del Cerebro Forense", expanded=True):
                 st.markdown(_ia_msgs[-1]["content"])
-                st.caption("💡 Puedes ver el historial completo en la pestaña **🧠 Asistente IA**.")
+                st.caption("Historial completo disponible en la pestaña **Asistente IA**.")
 
     # Procesar _pending_query ANTES de las pestañas (los botones 🔍 lo setean
     # desde cualquier pestaña; si lo procesamos dentro de tab_ia nunca se ejecuta

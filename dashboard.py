@@ -33,7 +33,7 @@ from chat_service import (
     build_db_context, build_web_context, call_deepseek,
     classify_intent, build_forensic_context,
 )
-from config import DAILY_QUERY_LIMIT, OC_TIPO_TRATO_DIRECTO
+from config import DAILY_QUERY_LIMIT, OC_TIPO_TRATO_DIRECTO, DB_NAME
 from alertas_personas import AlertasPersonas
 
 logger = logging.getLogger(__name__)
@@ -1937,6 +1937,122 @@ def _render_tab_ia(df_filtrado, prompt=None):
     st.caption(f"Consultas restantes hoy: **{remaining}**/{daily_limit}")
 
 
+def _render_tab_servel(df_filtrado: pd.DataFrame):
+    """Panel dedicado a aportes politicos SERVEL + cruces con proveedores del Estado."""
+    st.markdown("## 💰 Aportes políticos (SERVEL) vs. Proveedores del Estado")
+    st.caption(
+        "Datos públicos de ingresos/aportes a campañas electorales cargados desde "
+        "servel.cl. SERVEL no publica RUT del aportante, por lo que los cruces con "
+        "proveedores se hacen por coincidencia de **nombre** (aproximada)."
+    )
+
+    try:
+        with sqlite3.connect(DB_NAME) as conn:
+            total = conn.execute("SELECT COUNT(*) FROM aportes_servel").fetchone()[0]
+            if total == 0:
+                st.warning("Tabla aportes_servel vacía. Ejecuta `py cargar_servel_auto.py`.")
+                return
+
+            monto_total = conn.execute("SELECT COALESCE(SUM(monto_aporte), 0) FROM aportes_servel").fetchone()[0]
+            n_aportantes = conn.execute("SELECT COUNT(DISTINCT nombre_aportante) FROM aportes_servel").fetchone()[0]
+            n_receptores = conn.execute("SELECT COUNT(DISTINCT nombre_receptor) FROM aportes_servel WHERE nombre_receptor != ''").fetchone()[0]
+
+            k1, k2, k3, k4 = st.columns(4)
+            k1.metric("Aportes registrados", f"{total:,}".replace(",", "."))
+            k2.metric("Monto total", f"${monto_total/1e9:,.2f} MMM")
+            k3.metric("Aportantes únicos", f"{n_aportantes:,}".replace(",", "."))
+            k4.metric("Receptores únicos", f"{n_receptores:,}".replace(",", "."))
+
+            st.markdown("### 🏆 Top 15 Aportantes (quién más donó)")
+            top_apt = pd.read_sql("""
+                SELECT nombre_aportante AS Aportante,
+                       COUNT(*) AS Aportes,
+                       ROUND(SUM(monto_aporte)) AS "Monto Total (CLP)"
+                FROM aportes_servel
+                WHERE nombre_aportante != ''
+                GROUP BY nombre_aportante
+                ORDER BY SUM(monto_aporte) DESC
+                LIMIT 15
+            """, conn)
+            st.dataframe(top_apt, use_container_width=True, hide_index=True)
+
+            st.markdown("### 🎯 Top 15 Receptores (quién más recibió)")
+            top_rec = pd.read_sql("""
+                SELECT nombre_receptor AS Receptor,
+                       COUNT(*) AS Aportes,
+                       ROUND(SUM(monto_aporte)) AS "Monto Total (CLP)"
+                FROM aportes_servel
+                WHERE nombre_receptor != ''
+                GROUP BY nombre_receptor
+                ORDER BY SUM(monto_aporte) DESC
+                LIMIT 15
+            """, conn)
+            st.dataframe(top_rec, use_container_width=True, hide_index=True)
+
+            st.markdown("### 🪞 Autodonaciones (aportante = receptor)")
+            st.caption("Candidatos que se financiaron a sí mismos. Común pero útil para ver magnitud del aporte propio vs. externo.")
+            auto = pd.read_sql("""
+                SELECT nombre_aportante AS Nombre,
+                       COUNT(*) AS Aportes,
+                       ROUND(SUM(monto_aporte)) AS "Monto Propio (CLP)"
+                FROM aportes_servel
+                WHERE nombre_aportante != '' AND nombre_receptor != ''
+                  AND (
+                    nombre_aportante = nombre_receptor
+                    OR nombre_aportante LIKE '%' || SUBSTR(nombre_receptor, 1, 15) || '%'
+                    OR nombre_receptor LIKE '%' || SUBSTR(nombre_aportante, 1, 15) || '%'
+                  )
+                GROUP BY nombre_aportante
+                ORDER BY SUM(monto_aporte) DESC
+                LIMIT 20
+            """, conn)
+            st.dataframe(auto, use_container_width=True, hide_index=True)
+
+            st.markdown("### 🔗 Cruce: aportantes que también son **proveedores del Estado**")
+            st.caption(
+                "Empresas que donaron a campañas Y aparecen en órdenes de compra "
+                "del Estado. Señal de posible captura política (no implica delito). "
+                "Pre-filtrado a aportantes tipo empresa (SA/LTDA/SPA/etc)."
+            )
+            try:
+                cruce = pd.read_sql("""
+                    SELECT nombre_aportante AS "Aportante/Proveedor",
+                           n_aportes AS "N° Aportes",
+                           ROUND(total_donado) AS "Total Donado (CLP)",
+                           n_ocs AS "N° OCs del Estado",
+                           ROUND(total_ocs) AS "Total OCs (CLP)",
+                           rut_proveedor AS "RUT",
+                           receptores AS "A quién(es) donó"
+                    FROM cruce_aportes_proveedores
+                    ORDER BY total_ocs DESC
+                    LIMIT 100
+                """, conn)
+            except Exception:
+                cruce = pd.DataFrame()
+                st.info("Tabla de cruces no generada. Ejecuta `py cargar_servel_auto.py`.")
+            if cruce.empty:
+                st.info("Sin cruces detectados aún.")
+            else:
+                st.success(f"🚨 {len(cruce)} aportantes tipo empresa también aparecen como proveedores del Estado.")
+                st.dataframe(cruce, use_container_width=True, hide_index=True)
+
+            st.markdown("### 📊 Por elección / campaña")
+            por_eleccion = pd.read_sql("""
+                SELECT eleccion_campaña AS Elección,
+                       COUNT(*) AS Aportes,
+                       ROUND(SUM(monto_aporte)) AS "Total (CLP)"
+                FROM aportes_servel
+                WHERE eleccion_campaña != ''
+                GROUP BY eleccion_campaña
+                ORDER BY SUM(monto_aporte) DESC
+                LIMIT 20
+            """, conn)
+            st.dataframe(por_eleccion, use_container_width=True, hide_index=True)
+
+    except Exception as exc:
+        st.error(f"Error leyendo aportes_servel: {exc}")
+
+
 def main():
     init_feedback_db()
 
@@ -2134,6 +2250,7 @@ def main():
     tab_names = [
         "Panel General",
         "Cruces Forenses",
+        "Aportes SERVEL",
         "Datos Crudos",
         "Fuentes",
         "En la Mira",
@@ -2211,7 +2328,7 @@ def main():
                     st.rerun()
             st.markdown('</div>', unsafe_allow_html=True)
 
-    tab_estadisticas, tab_cruce, tab_registro, tab_medios, tab_mira, tab_analistas, tab_ia = st.tabs(tab_names)
+    tab_estadisticas, tab_cruce, tab_servel, tab_registro, tab_medios, tab_mira, tab_analistas, tab_ia = st.tabs(tab_names)
 
 
 
@@ -2220,6 +2337,9 @@ def main():
 
     with tab_cruce:
         _render_tab_cruces(df_filtrado, total_proveedores, total_compradores, n_trato_directo, filtro_global)
+
+    with tab_servel:
+        _render_tab_servel(df_filtrado)
 
     with tab_registro:
         _render_tab_datos(df_filtrado, filtro_global)

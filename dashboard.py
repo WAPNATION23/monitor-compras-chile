@@ -2049,6 +2049,107 @@ def _render_tab_servel(df_filtrado: pd.DataFrame):
             """, conn)
             st.dataframe(por_eleccion, use_container_width=True, hide_index=True)
 
+            # ═══════════════════════════════════════════════════════════
+            # GASTOS SERVEL — Proveedores que facturaron a campanas
+            # ═══════════════════════════════════════════════════════════
+            total_gastos = conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='gastos_servel'"
+            ).fetchone()
+            if total_gastos:
+                st.markdown("---")
+                st.markdown("## 🧾 Gastos de campaña (proveedores facturando a candidatos)")
+                st.caption(
+                    "A diferencia de los aportes, los **gastos SÍ incluyen RUT del proveedor** → "
+                    "cruce EXACTO con proveedores del Estado. Detecta empresas que primero "
+                    "le facturaron a una campaña y luego recibieron órdenes de compra del Estado."
+                )
+                n_gastos = conn.execute("SELECT COUNT(*) FROM gastos_servel").fetchone()[0]
+                monto_gastos = conn.execute("SELECT COALESCE(SUM(monto), 0) FROM gastos_servel").fetchone()[0]
+                n_provs = conn.execute("SELECT COUNT(DISTINCT rut_proveedor) FROM gastos_servel WHERE rut_proveedor != ''").fetchone()[0]
+                g1, g2, g3 = st.columns(3)
+                g1.metric("Gastos registrados", f"{n_gastos:,}".replace(",", "."))
+                g2.metric("Monto total facturado", f"${monto_gastos/1e9:,.2f} MMM")
+                g3.metric("Proveedores únicos (RUT)", f"{n_provs:,}".replace(",", "."))
+
+                st.markdown("### 🚨 Cruce RUT EXACTO: proveedor de campaña + proveedor del Estado")
+                try:
+                    cruce_g = pd.read_sql("""
+                        SELECT rut AS RUT,
+                               nombre_proveedor AS "Proveedor",
+                               n_facturas_campana AS "Facturas a campaña",
+                               ROUND(total_facturado_campana) AS "Total facturado campaña (CLP)",
+                               n_ocs_estado AS "OCs del Estado",
+                               ROUND(total_ocs_estado) AS "Total OCs Estado (CLP)",
+                               candidatos_beneficiados AS "Candidato(s) que beneficiaron",
+                               partidos AS "Partido(s)"
+                        FROM cruce_gastos_proveedores
+                        ORDER BY total_ocs_estado DESC
+                        LIMIT 100
+                    """, conn)
+                except Exception:
+                    cruce_g = pd.DataFrame()
+                if cruce_g.empty:
+                    st.info("Sin cruces generados. Ejecuta `py cargar_gastos_servel.py`.")
+                else:
+                    st.success(f"🚨 **{len(cruce_g)}** proveedores de campaña son también proveedores del Estado (match por RUT exacto).")
+                    st.dataframe(cruce_g, use_container_width=True, hide_index=True)
+
+                st.markdown("### Top 15 proveedores de campaña (por monto facturado)")
+                top_prov_camp = pd.read_sql("""
+                    SELECT nombre_proveedor AS Proveedor,
+                           rut_proveedor AS RUT,
+                           COUNT(*) AS Facturas,
+                           ROUND(SUM(monto)) AS "Total (CLP)",
+                           COUNT(DISTINCT nombre_candidato) AS "N° Candidatos"
+                    FROM gastos_servel
+                    WHERE nombre_proveedor != ''
+                    GROUP BY nombre_proveedor, rut_proveedor
+                    ORDER BY SUM(monto) DESC
+                    LIMIT 15
+                """, conn)
+                st.dataframe(top_prov_camp, use_container_width=True, hide_index=True)
+
+                st.markdown("### 🕸️ Red de flujos: aportante → candidato (top 20)")
+                st.caption("Visualización de quién financia a quién (top 20 aportes más grandes).")
+                try:
+                    import plotly.graph_objects as go
+                    red = pd.read_sql("""
+                        SELECT nombre_aportante, nombre_receptor, SUM(monto_aporte) AS monto
+                        FROM aportes_servel
+                        WHERE nombre_aportante != '' AND nombre_receptor != ''
+                        GROUP BY nombre_aportante, nombre_receptor
+                        ORDER BY monto DESC LIMIT 20
+                    """, conn)
+                    if not red.empty:
+                        nodes = list(pd.concat([red["nombre_aportante"], red["nombre_receptor"]]).unique())
+                        node_idx = {n: i for i, n in enumerate(nodes)}
+                        # Colorear: aportantes en azul, receptores (solo) en rojo
+                        colores = []
+                        for n in nodes:
+                            es_apt = n in red["nombre_aportante"].values
+                            es_rec = n in red["nombre_receptor"].values
+                            colores.append("#ef4444" if es_rec and not es_apt else ("#3b82f6" if es_apt and not es_rec else "#a855f7"))
+                        fig = go.Figure(go.Sankey(
+                            node=dict(
+                                pad=15, thickness=18,
+                                line=dict(color="black", width=0.3),
+                                label=[n[:35] for n in nodes],
+                                color=colores,
+                            ),
+                            link=dict(
+                                source=[node_idx[a] for a in red["nombre_aportante"]],
+                                target=[node_idx[r] for r in red["nombre_receptor"]],
+                                value=red["monto"].tolist(),
+                                label=[f"${m/1e6:,.0f} M" for m in red["monto"]],
+                            ),
+                        ))
+                        fig.update_layout(height=550, font=dict(size=11),
+                                          margin=dict(l=5, r=5, t=30, b=5),
+                                          title="Flujo de aportes (azul = aportante · rojo = receptor · morado = ambos)")
+                        st.plotly_chart(fig, use_container_width=True)
+                except Exception as exc:
+                    st.caption(f"Grafo no disponible: {exc}")
+
     except Exception as exc:
         st.error(f"Error leyendo aportes_servel: {exc}")
 

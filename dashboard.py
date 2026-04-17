@@ -1712,33 +1712,39 @@ def _process_ia_query(effective_prompt: str, *, is_from_button: bool = False):
 
     api_key = os.getenv("DEEPSEEK_API_KEY", "")
     if not api_key:
-        revelacion = "Asistente IA no disponible: falta la clave DEEPSEEK_API_KEY en .env"
+        revelacion = (
+            "**Asistente IA no disponible.**\n\n"
+            "Falta la variable de entorno `DEEPSEEK_API_KEY`. "
+            "Configurála en Streamlit Cloud (Settings → Secrets) o en tu `.env` local."
+        )
         tools_used: list[str] = []
     else:
         try:
-            intents = classify_intent(effective_prompt)
-            intent_labels = {"persona": "Persona", "proveedor": "Proveedor",
-                             "organismo": "Organismo", "anomalia": "Anomalía",
-                             "resumen": "Resumen", "general": "General"}
-            detected = ", ".join(intent_labels.get(i, i) for i in intents)
-            st.toast(f"Intención detectada: {detected}")
+            with st.status("Cerebro Forense procesando la consulta…", expanded=True) as status:
+                intents = classify_intent(effective_prompt)
+                intent_labels = {"persona": "Persona", "proveedor": "Proveedor",
+                                 "organismo": "Organismo", "anomalia": "Anomalía",
+                                 "resumen": "Resumen", "general": "General"}
+                detected = ", ".join(intent_labels.get(i, i) for i in intents)
+                st.write(f"Intención detectada: **{detected}**")
 
-            st.toast("Ejecutando herramientas forenses...")
-            forensic_context, tools_used = build_forensic_context(effective_prompt)
+                st.write("Ejecutando herramientas forenses…")
+                forensic_context, tools_used = build_forensic_context(effective_prompt)
 
-            st.toast("Escaneando base de datos local...")
-            db_context = build_db_context(effective_prompt)
-            tools_used.append("DB Local")
+                st.write("Escaneando base de datos local…")
+                db_context = build_db_context(effective_prompt)
+                tools_used.append("DB Local")
 
-            st.toast("Buscando información en la web...")
-            web_context = build_web_context(effective_prompt)
-            tools_used.append("Web OSINT")
+                st.write("Buscando información en la web…")
+                web_context = build_web_context(effective_prompt)
+                tools_used.append("Web OSINT")
 
-            st.toast("Analizando con Cerebro Forense...")
-            revelacion = call_deepseek(
-                st.session_state.ia_messages, web_context, db_context,
-                forensic_context
-            )
+                st.write("Analizando con Cerebro Forense…")
+                revelacion = call_deepseek(
+                    st.session_state.ia_messages, web_context, db_context,
+                    forensic_context
+                )
+                status.update(label="Consulta procesada", state="complete", expanded=False)
         except (requests.RequestException, KeyError, ValueError) as ia_exc:
             revelacion = f"Error al consultar el asistente IA: {ia_exc}"
             tools_used = []
@@ -1914,6 +1920,16 @@ def main():
             f"{datetime.now().strftime('%d/%m/%Y %H:%M')}</span>"
             f"</div>",
             unsafe_allow_html=True,
+        )
+
+    # Aviso si la IA no está configurada (botones "Investigar" dependen de ella)
+    if not os.getenv("DEEPSEEK_API_KEY", ""):
+        st.warning(
+            "Asistente IA desactivado en este entorno. "
+            "Los botones **Investigar** y la pestaña **Asistente IA** requieren configurar "
+            "`DEEPSEEK_API_KEY` en Streamlit Cloud (Settings → Secrets) o en tu `.env` local. "
+            "El resto del dashboard funciona normalmente.",
+            icon="⚠",
         )
 
     # VERIFICACIÓN DE BD — restaurar seed comprimido si falta o está vacía
@@ -2094,9 +2110,18 @@ def main():
     if st.session_state.pop("_show_ia_response", False):
         _ia_msgs = st.session_state.get("ia_messages", [])
         if _ia_msgs and _ia_msgs[-1]["role"] == "assistant":
-            with st.expander("Respuesta del Cerebro Forense", expanded=True):
+            st.toast("Respuesta del Cerebro Forense lista", icon="✓")
+            st.markdown('<div id="ia-anchor"></div>', unsafe_allow_html=True)
+            st.success("**Respuesta del Cerebro Forense** — resultado de tu última investigación:")
+            with st.container(border=True):
                 st.markdown(_ia_msgs[-1]["content"])
                 st.caption("Historial completo disponible en la pestaña **Asistente IA**.")
+            # Auto-scroll al top para que el usuario vea la respuesta
+            from streamlit.components.v1 import html as _components_html
+            _components_html(
+                "<script>window.parent.scrollTo({top:0,behavior:'smooth'});</script>",
+                height=0,
+            )
 
     # Procesar _pending_query ANTES de las pestañas (los botones 🔍 lo setean
     # desde cualquier pestaña; si lo procesamos dentro de tab_ia nunca se ejecuta

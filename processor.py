@@ -375,6 +375,26 @@ class DataProcessor:
                 after_count = conn.execute("SELECT COUNT(*) FROM ordenes_items").fetchone()[0]
                 inserted = after_count - before_count
 
+                # Backfill: rellenar rut_proveedor vacios usando otras filas
+                # con el mismo nombre que si tienen RUT. Evita que botones
+                # Investigar reciban "(RUT )" cuando el dato existe en la BD.
+                backfilled = conn.execute(
+                    """
+                    UPDATE ordenes_items
+                    SET rut_proveedor = (
+                        SELECT rut_proveedor FROM ordenes_items oi2
+                        WHERE LOWER(oi2.nombre_proveedor) = LOWER(ordenes_items.nombre_proveedor)
+                          AND oi2.rut_proveedor != ''
+                        LIMIT 1
+                    )
+                    WHERE (rut_proveedor IS NULL OR rut_proveedor = '')
+                      AND nombre_proveedor != ''
+                    """
+                ).rowcount
+                conn.commit()
+                if backfilled:
+                    logger.info("✓ Backfill: %d filas con RUT recuperado por nombre.", backfilled)
+
             logger.info(
                 "✓ %d nuevos ítems almacenados en %s (%d duplicados omitidos).",
                 inserted, self.db_path, len(df) - inserted,

@@ -1776,8 +1776,8 @@ def _process_ia_query(effective_prompt: str, *, is_from_button: bool = False):
                     st.warning(f"No se encontraron registros para RUT {rut_detectado}.")
 
     if is_from_button:
-        # Guardar respuesta y activar modal para el próximo render — el modal
-        # aparece centrado sobre la página sin importar dónde esté el scroll.
+        # Guardar respuesta y activar panel persistente para el próximo render —
+        # se muestra arriba de las pestañas y SOLO se cierra con el botón.
         _ia_msgs = st.session_state.get("ia_messages", [])
         if _ia_msgs and _ia_msgs[-1]["role"] == "assistant":
             st.session_state["_ia_modal_content"] = _ia_msgs[-1]["content"]
@@ -2117,17 +2117,46 @@ def main():
     if _pending:
         _process_ia_query(_pending, is_from_button=True)
 
-    # Modal con la respuesta del Cerebro Forense — aparece centrado sobre la
-    # página para que el usuario SIEMPRE la vea, aunque esté scrolleado.
+    # Panel persistente con la respuesta del Cerebro Forense — se renderiza
+    # arriba de las pestañas y SOLO se cierra con el botón explícito (no se
+    # descarta al hacer click fuera ni al scrollear, a diferencia de st.dialog).
     if st.session_state.get("_ia_modal_open"):
-        @st.dialog("Respuesta del Cerebro Forense", width="large")
-        def _show_ia_modal():
+        st.markdown(
+            """
+            <style>
+            .forensic-answer-panel {
+                background: linear-gradient(135deg, #0b1e3f 0%, #102a52 100%);
+                border: 2px solid #4a90e2;
+                border-radius: 12px;
+                padding: 1.5rem 1.75rem;
+                margin: 0.5rem 0 1.5rem 0;
+                box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+            }
+            .forensic-answer-panel h4 {
+                color: #4a90e2;
+                margin: 0 0 0.75rem 0;
+                font-size: 1.15rem;
+                letter-spacing: 0.5px;
+            }
+            .forensic-answer-panel .answer-body {
+                color: #e8eef7;
+                line-height: 1.55;
+            }
+            </style>
+            """,
+            unsafe_allow_html=True,
+        )
+        with st.container(border=False):
+            st.markdown('<div class="forensic-answer-panel">', unsafe_allow_html=True)
+            st.markdown("#### Respuesta del Cerebro Forense")
             st.markdown(st.session_state.get("_ia_modal_content", ""))
-            st.caption("Historial completo disponible en la pestaña **Asistente IA**.")
-            if st.button("Cerrar", type="primary", use_container_width=True):
-                st.session_state["_ia_modal_open"] = False
-                st.rerun()
-        _show_ia_modal()
+            st.caption("Historial completo en la pestaña **Asistente IA**.")
+            col_a, col_b = st.columns([1, 5])
+            with col_a:
+                if st.button("Cerrar", type="primary", key="_close_ia_panel"):
+                    st.session_state["_ia_modal_open"] = False
+                    st.rerun()
+            st.markdown('</div>', unsafe_allow_html=True)
 
     tab_estadisticas, tab_cruce, tab_registro, tab_medios, tab_mira, tab_analistas, tab_ia = st.tabs(tab_names)
 

@@ -546,6 +546,8 @@ def _investigate_buttons(entities: list[tuple[str, str]], prefix: str, entity_ty
                 else:
                     query = f"Investiga al organismo {name}{rut_part}: ¿abusa del trato directo, tiene fiscalizaciones de CGR o proveedores sospechosos?"
                 st.session_state["_pending_query"] = query
+                st.session_state["_scroll_to_top"] = True
+                st.toast(f"Investigando {name}… mirá arriba para ver el progreso.", icon="🔎")
                 st.rerun()
 
 
@@ -2144,6 +2146,18 @@ def main():
     # cuando el usuario está en otra pestaña).
     _pending = st.session_state.pop("_pending_query", None)
     if _pending:
+        # Scroll al tope + banner visible mientras procesa — crítico en móvil
+        # donde el usuario clickea un botón abajo y siente que la pantalla
+        # se congela sin feedback. Aquí forzamos que vea el st.status.
+        st.markdown(
+            """
+            <script>
+            window.parent.scrollTo({top: 0, behavior: 'auto'});
+            window.scrollTo({top: 0, behavior: 'auto'});
+            </script>
+            """,
+            unsafe_allow_html=True,
+        )
         _process_ia_query(_pending, is_from_button=True)
 
     # Panel persistente con la respuesta del Cerebro Forense — se renderiza
@@ -2172,6 +2186,16 @@ def main():
                 line-height: 1.55;
             }
             </style>
+            <div id="forensic-answer-anchor"></div>
+            <script>
+            // Auto-scroll al panel en movil/desktop para que siempre sea visible.
+            setTimeout(function() {
+                var el = window.parent.document.getElementById('forensic-answer-anchor')
+                    || document.getElementById('forensic-answer-anchor');
+                if (el) el.scrollIntoView({behavior: 'smooth', block: 'start'});
+                window.parent.scrollTo({top: 0, behavior: 'smooth'});
+            }, 100);
+            </script>
             """,
             unsafe_allow_html=True,
         )

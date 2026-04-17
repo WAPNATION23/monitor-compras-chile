@@ -499,6 +499,31 @@ def _run_extraction(max_oc: int):
         st.error(f"Error durante la extracción: {exc}")
 
 
+def _resolve_missing_rut(name: str, entity_type: str) -> str:
+    """If RUT is empty, try to find it in the DB by entity name.
+
+    Many rows are duplicated (one with RUT, one without). When a button
+    is clicked on the empty-RUT version, we look up the real RUT so the
+    AI can actually cross-reference against SERVEL / Contraloría / etc.
+    """
+    if not name:
+        return ""
+    col = "rut_proveedor" if entity_type == "proveedor" else "rut_comprador"
+    name_col = "nombre_proveedor" if entity_type == "proveedor" else "nombre_comprador"
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        row = conn.execute(
+            f"SELECT {col} FROM ordenes_items "
+            f"WHERE LOWER({name_col}) = LOWER(?) AND {col} != '' "
+            f"ORDER BY LENGTH({col}) DESC LIMIT 1",
+            (name,),
+        ).fetchone()
+        conn.close()
+        return row[0] if row and row[0] else ""
+    except sqlite3.Error:
+        return ""
+
+
 def _investigate_buttons(entities: list[tuple[str, str]], prefix: str, entity_type: str = "proveedor"):
     """Render quick-investigate buttons that pre-fill the IA chat.
 
@@ -512,10 +537,14 @@ def _investigate_buttons(entities: list[tuple[str, str]], prefix: str, entity_ty
         with cols[i]:
             label = name[:22] + "…" if len(name) > 22 else name
             if st.button(f"Investigar · {label}", key=f"inv_{prefix}_{i}", use_container_width=True):
+                # Si la fila clickeada tiene RUT vacío (común por duplicados
+                # en la BD), buscarlo por nombre antes de mandar a la IA.
+                effective_rut = rut if rut else _resolve_missing_rut(name, entity_type)
+                rut_part = f" (RUT {effective_rut})" if effective_rut else " (RUT no disponible)"
                 if entity_type == "proveedor":
-                    query = f"Investiga al proveedor {name} (RUT {rut}): ¿tiene anomalías, vínculos políticos, fiscalizaciones o aportes electorales?"
+                    query = f"Investiga al proveedor {name}{rut_part}: ¿tiene anomalías, vínculos políticos, fiscalizaciones o aportes electorales?"
                 else:
-                    query = f"Investiga al organismo {name} (RUT {rut}): ¿abusa del trato directo, tiene fiscalizaciones de CGR o proveedores sospechosos?"
+                    query = f"Investiga al organismo {name}{rut_part}: ¿abusa del trato directo, tiene fiscalizaciones de CGR o proveedores sospechosos?"
                 st.session_state["_pending_query"] = query
                 st.rerun()
 

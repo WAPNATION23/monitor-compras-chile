@@ -1776,7 +1776,12 @@ def _process_ia_query(effective_prompt: str, *, is_from_button: bool = False):
                     st.warning(f"No se encontraron registros para RUT {rut_detectado}.")
 
     if is_from_button:
-        st.session_state["_show_ia_response"] = True
+        # Guardar respuesta y activar modal para el próximo render — el modal
+        # aparece centrado sobre la página sin importar dónde esté el scroll.
+        _ia_msgs = st.session_state.get("ia_messages", [])
+        if _ia_msgs and _ia_msgs[-1]["role"] == "assistant":
+            st.session_state["_ia_modal_content"] = _ia_msgs[-1]["content"]
+            st.session_state["_ia_modal_open"] = True
         st.rerun()
 
 
@@ -1922,12 +1927,11 @@ def main():
             unsafe_allow_html=True,
         )
 
-    # Aviso si la IA no está configurada (botones "Investigar" dependen de ella)
+    # Aviso solo si la IA no está configurada (los botones Investigar la usan)
     if not os.getenv("DEEPSEEK_API_KEY", ""):
         st.warning(
-            "Asistente IA desactivado en este entorno. "
-            "Los botones **Investigar** y la pestaña **Asistente IA** requieren configurar "
-            "`DEEPSEEK_API_KEY` en Streamlit Cloud (Settings → Secrets) o en tu `.env` local. "
+            "Asistente IA desactivado: configura `DEEPSEEK_API_KEY` en Streamlit Cloud "
+            "(Settings → Secrets) para habilitar los botones **Investigar** y la pestaña IA. "
             "El resto del dashboard funciona normalmente.",
             icon="⚠",
         )
@@ -2106,29 +2110,24 @@ def main():
         "Asistente IA",
     ]
 
-    # Mostrar última respuesta de la IA (visible desde cualquier pestaña)
-    if st.session_state.pop("_show_ia_response", False):
-        _ia_msgs = st.session_state.get("ia_messages", [])
-        if _ia_msgs and _ia_msgs[-1]["role"] == "assistant":
-            st.toast("Respuesta del Cerebro Forense lista", icon="✓")
-            st.markdown('<div id="ia-anchor"></div>', unsafe_allow_html=True)
-            st.success("**Respuesta del Cerebro Forense** — resultado de tu última investigación:")
-            with st.container(border=True):
-                st.markdown(_ia_msgs[-1]["content"])
-                st.caption("Historial completo disponible en la pestaña **Asistente IA**.")
-            # Auto-scroll al top para que el usuario vea la respuesta
-            from streamlit.components.v1 import html as _components_html
-            _components_html(
-                "<script>window.parent.scrollTo({top:0,behavior:'smooth'});</script>",
-                height=0,
-            )
-
-    # Procesar _pending_query ANTES de las pestañas (los botones 🔍 lo setean
+    # Procesar _pending_query ANTES de las pestañas (los botones Investigar lo setean
     # desde cualquier pestaña; si lo procesamos dentro de tab_ia nunca se ejecuta
     # cuando el usuario está en otra pestaña).
     _pending = st.session_state.pop("_pending_query", None)
     if _pending:
         _process_ia_query(_pending, is_from_button=True)
+
+    # Modal con la respuesta del Cerebro Forense — aparece centrado sobre la
+    # página para que el usuario SIEMPRE la vea, aunque esté scrolleado.
+    if st.session_state.get("_ia_modal_open"):
+        @st.dialog("Respuesta del Cerebro Forense", width="large")
+        def _show_ia_modal():
+            st.markdown(st.session_state.get("_ia_modal_content", ""))
+            st.caption("Historial completo disponible en la pestaña **Asistente IA**.")
+            if st.button("Cerrar", type="primary", use_container_width=True):
+                st.session_state["_ia_modal_open"] = False
+                st.rerun()
+        _show_ia_modal()
 
     tab_estadisticas, tab_cruce, tab_registro, tab_medios, tab_mira, tab_analistas, tab_ia = st.tabs(tab_names)
 

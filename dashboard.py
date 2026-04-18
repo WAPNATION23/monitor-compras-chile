@@ -1770,8 +1770,49 @@ def _render_tab_denuncias(df_filtrado):
     # PESTAÑA 6: ASISTENTE IA (CHATBOT FORENSE)
 
 
-def _process_ia_query(effective_prompt: str, *, is_from_button: bool = False):
-    """Run AI processing for a query. Works from any tab context."""
+def _run_forensic_pipeline(effective_prompt: str) -> tuple[str, list[str]]:
+    """Ejecuta la pipeline forense emitiendo st.write progresivos.
+
+    Cada st.write hace streaming al navegador en tiempo real, lo que permite
+    al usuario ver el progreso durante los 20-40s de procesamiento (no
+    funciona así con HTML custom porque Streamlit bufferiza el DOM).
+    """
+    intents = classify_intent(effective_prompt)
+    intent_labels = {"persona": "Persona", "proveedor": "Proveedor",
+                     "organismo": "Organismo", "anomalia": "Anomalía",
+                     "resumen": "Resumen", "general": "General"}
+    detected = ", ".join(intent_labels.get(i, i) for i in intents)
+    st.write(f"🎯 Intención detectada: **{detected}**")
+
+    st.write("🔍 Ejecutando herramientas forenses (SERVEL, CGR, InfoLobby, DIPRES)…")
+    forensic_context, tools_used = build_forensic_context(effective_prompt)
+
+    st.write("📊 Escaneando base de datos local (54.684 órdenes de compra)…")
+    db_context = build_db_context(effective_prompt)
+    tools_used.append("DB Local")
+
+    st.write("🌐 Buscando información en la web (DuckDuckGo OSINT)…")
+    web_context = build_web_context(effective_prompt)
+    tools_used.append("Web OSINT")
+
+    st.write("🧠 Analizando con DeepSeek (esto puede tardar 15-25s)…")
+    revelacion = call_deepseek(
+        st.session_state.ia_messages, web_context, db_context, forensic_context
+    )
+    return revelacion, tools_used
+
+
+def _process_ia_query(effective_prompt: str, *, is_from_button: bool = False, status_ctx=None):
+    """Run AI processing for a query. Works from any tab context.
+
+    Args:
+        effective_prompt: la query a investigar.
+        is_from_button: True si viene de un botón (desactiva rerun y muestra
+            respuesta inline en main()).
+        status_ctx: objeto st.status creado en main() cuando is_from_button=True.
+            Sus st.write internos SÍ hacen streaming al navegador (único modo
+            real de mostrar progreso en Streamlit).
+    """
     if "ia_messages" not in st.session_state:
         st.session_state.ia_messages = [
             {"role": "assistant", "content":
@@ -1815,47 +1856,20 @@ def _process_ia_query(effective_prompt: str, *, is_from_button: bool = False):
         )
         tools_used: list[str] = []
     else:
+        # Usar el status_ctx pasado desde main() (botones Investigar) o crear uno
+        # nuevo (chat_input). En ambos casos Streamlit hace streaming progresivo
+        # al navegador con cada st.write, que es lo ÚNICO que el usuario ve
+        # durante los 20-40s de procesamiento.
+        _owns_status = status_ctx is None
+        _status = status_ctx if status_ctx else st.status("Cerebro Forense procesando…", expanded=True)
+        _ctx = _status if _owns_status else None
         try:
-            if is_from_button:
-                # Cuando viene de un botón, el overlay full-screen ya muestra el
-                # estado. Procesamos silenciosamente para no ensuciar el área
-                # arriba de las pestañas con st.status/st.write residuales.
-                intents = classify_intent(effective_prompt)
-                forensic_context, tools_used = build_forensic_context(effective_prompt)
-                db_context = build_db_context(effective_prompt)
-                tools_used.append("DB Local")
-                web_context = build_web_context(effective_prompt)
-                tools_used.append("Web OSINT")
-                revelacion = call_deepseek(
-                    st.session_state.ia_messages, web_context, db_context,
-                    forensic_context
-                )
+            if _ctx is not None:
+                with _ctx:
+                    revelacion, tools_used = _run_forensic_pipeline(effective_prompt)
+                    _status.update(label="Consulta procesada", state="complete", expanded=False)
             else:
-                with st.status("Cerebro Forense procesando la consulta…", expanded=True) as status:
-                    intents = classify_intent(effective_prompt)
-                    intent_labels = {"persona": "Persona", "proveedor": "Proveedor",
-                                     "organismo": "Organismo", "anomalia": "Anomalía",
-                                     "resumen": "Resumen", "general": "General"}
-                    detected = ", ".join(intent_labels.get(i, i) for i in intents)
-                    st.write(f"Intención detectada: **{detected}**")
-
-                    st.write("Ejecutando herramientas forenses…")
-                    forensic_context, tools_used = build_forensic_context(effective_prompt)
-
-                    st.write("Escaneando base de datos local…")
-                    db_context = build_db_context(effective_prompt)
-                    tools_used.append("DB Local")
-
-                    st.write("Buscando información en la web…")
-                    web_context = build_web_context(effective_prompt)
-                    tools_used.append("Web OSINT")
-
-                    st.write("Analizando con Cerebro Forense…")
-                    revelacion = call_deepseek(
-                        st.session_state.ia_messages, web_context, db_context,
-                        forensic_context
-                    )
-                    status.update(label="Consulta procesada", state="complete", expanded=False)
+                revelacion, tools_used = _run_forensic_pipeline(effective_prompt)
         except (requests.RequestException, KeyError, ValueError) as ia_exc:
             revelacion = f"Error al consultar el asistente IA: {ia_exc}"
             tools_used = []
@@ -1887,22 +1901,20 @@ def _process_ia_query(effective_prompt: str, *, is_from_button: bool = False):
                     st.warning(f"No se encontraron registros para RUT {rut_detectado}.")
 
     if is_from_button:
-        # Señal de "respuesta lista" — se muestra un toast/banner de éxito en el
-        # próximo render (sin panel modal ni JS auto-click que secuestre la
-        # navegación entre pestañas). El usuario entra a "Asistente IA" cuando
-        # quiera y ve la respuesta completa en el historial del chat.
+        # Guardar la respuesta para renderizarla INLINE arriba de las pestañas
+        # en ESTE mismo render (sin rerun — el rerun borraría el status y dejaría
+        # al usuario sin feedback visual durante otros 30s).
         _ia_msgs = st.session_state.get("ia_messages", [])
         if _ia_msgs and _ia_msgs[-1]["role"] == "assistant":
             st.session_state["_ia_response_ready"] = True
-            # Guardar la respuesta para renderizarla INLINE arriba de las pestañas
-            # en el próximo render (así el usuario la ve de inmediato sin tener
-            # que cambiar de pestaña y sin que el chat se vea "vacío").
             st.session_state["_last_button_response"] = {
                 "query": effective_prompt,
                 "answer": _ia_msgs[-1]["content"],
                 "tools": tools_used,
             }
-        st.rerun()
+        # NO hacemos st.rerun() — queremos que main() siga al flujo siguiente y
+        # renderice el panel inline con la respuesta en el mismo pass.
+        return
 
 
 def _render_tab_ia(df_filtrado, prompt=None):
@@ -2467,84 +2479,42 @@ def main():
     # Procesar _pending_query ANTES de las pestañas (los botones Investigar lo setean
     # desde cualquier pestaña; si lo procesamos dentro de tab_ia nunca se ejecuta
     # cuando el usuario está en otra pestaña).
+    #
+    # IMPORTANTE: Streamlit bufferiza st.markdown(html) y solo lo envía al navegador
+    # cuando termina el script. Por eso un overlay HTML custom NO se ve durante
+    # los 30s de procesamiento. La ÚNICA forma de mostrar progreso en vivo es
+    # usando st.status / st.spinner / st.write — esos sí hacen streaming.
     _pending = st.session_state.pop("_pending_query", None)
     if _pending:
-        # Overlay a pantalla completa IMPOSIBLE de ignorar — evita que el usuario
-        # piense que "se fue el net" mientras la IA tarda 10-40s. Se auto-elimina
-        # cuando el script termina y Streamlit re-renderiza la página.
+        # Banner visible arriba mientras procesa. Streamlit lo streamea al DOM.
         st.markdown(
-            """
-            <style>
-            #forensic-overlay {
-                position: fixed; inset: 0; z-index: 999999;
-                background: rgba(2, 6, 23, 0.92);
-                display: flex; align-items: center; justify-content: center;
-                flex-direction: column;
-                backdrop-filter: blur(8px);
-                animation: fadein 0.2s ease-in;
-            }
-            @keyframes fadein { from { opacity: 0; } to { opacity: 1; } }
-            #forensic-overlay .box {
-                background: linear-gradient(135deg, #0b1e3f 0%, #1e3a8a 100%);
-                border: 2px solid #60a5fa;
-                border-radius: 16px;
-                padding: 32px 40px;
-                max-width: 520px;
-                text-align: center;
-                box-shadow: 0 20px 60px rgba(37, 99, 235, 0.4);
-            }
-            #forensic-overlay .spinner {
-                width: 64px; height: 64px;
-                border: 5px solid rgba(96, 165, 250, 0.2);
-                border-top-color: #60a5fa;
-                border-radius: 50%;
-                animation: spin 0.9s linear infinite;
-                margin: 0 auto 20px auto;
-            }
-            @keyframes spin { to { transform: rotate(360deg); } }
-            #forensic-overlay h2 {
-                color: #f8fafc; margin: 0 0 12px 0;
-                font-size: 22px; font-weight: 700;
-                letter-spacing: 0.3px;
-            }
-            #forensic-overlay p {
-                color: #cbd5e1; margin: 6px 0; font-size: 14px;
-                line-height: 1.55;
-            }
-            #forensic-overlay .sources {
-                color: #94a3b8; font-size: 12px; margin-top: 14px;
-                letter-spacing: 0.3px;
-            }
-            #forensic-overlay .tip {
-                color: #fbbf24; font-size: 12px; margin-top: 18px;
-                font-weight: 600;
-            }
-            </style>
-            <div id="forensic-overlay">
-              <div class="box">
-                <div class="spinner"></div>
-                <h2>🧠 Cerebro Forense investigando…</h2>
-                <p>Cruzando datos en tiempo real. Esto puede tardar <b>20-40 segundos</b>.</p>
-                <div class="sources">
-                  Mercado Público · SERVEL · InfoLobby · CGR · InfoProbidad · DIPRES · Web OSINT
-                </div>
-                <div class="tip">⏳ No cierres la pestaña ni refresques.</div>
+            f"""
+            <div style="background: linear-gradient(135deg, #1e3a8a 0%, #2563eb 100%);
+                        color:#fff; padding:16px 20px; border-radius:12px;
+                        margin:8px 0 16px 0; box-shadow:0 6px 20px rgba(37,99,235,0.4);
+                        border-left:5px solid #60a5fa;">
+              <div style="font-weight:700; font-size:16px; letter-spacing:0.3px;">
+                🧠 Cerebro Forense investigando…
+              </div>
+              <div style="font-size:13px; opacity:0.92; margin-top:6px;">
+                Consultando 7 fuentes oficiales en paralelo. Esto toma <b>20-40 segundos</b>.
+                <b>No cierres la pestaña ni refresques</b> — el resultado aparecerá aquí mismo.
               </div>
             </div>
             """,
             unsafe_allow_html=True,
         )
-        _process_ia_query(_pending, is_from_button=True)
+        # st.status hace streaming progresivo al navegador con cada st.write interno.
+        # Eso es lo que hace que el usuario VEA que el sistema está trabajando.
+        with st.status(f"🔍 Investigando: *{_pending[:80]}{'…' if len(_pending) > 80 else ''}*", expanded=True) as _status:
+            _process_ia_query(_pending, is_from_button=True, status_ctx=_status)
+            _status.update(label="✅ Investigación completada", state="complete", expanded=False)
 
-    # Aviso compacto cuando acaba de llegar una respuesta (sin panel modal ni JS
-    # que secuestre navegación). El usuario ve el toast y luego entra a la tab
-    # Asistente IA cuando quiera.
+    # Toast + renderizar respuesta del ÚLTIMO botón Investigar INLINE arriba de las
+    # pestañas (el usuario la ve de inmediato sin cambiar de pestaña).
     if st.session_state.pop("_ia_response_ready", False):
         st.toast("Respuesta lista del Cerebro Forense", icon="🧠")
 
-    # Renderizar respuesta del ÚLTIMO botón Investigar directamente arriba de las
-    # pestañas (inline, sin JS, sin mandar al usuario a ningún lado). El historial
-    # completo sigue viviendo en la pestaña Asistente IA como siempre.
     _last_btn_response = st.session_state.get("_last_button_response")
     if _last_btn_response:
         st.markdown(

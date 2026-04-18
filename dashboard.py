@@ -2526,149 +2526,153 @@ def main():
         "Asistente IA",
     ]
 
-    # Procesar _pending_query ANTES de las pestañas (los botones Investigar lo setean
-    # desde cualquier pestaña; si lo procesamos dentro de tab_ia nunca se ejecuta
-    # cuando el usuario está en otra pestaña).
+    # ─────────────────────────────────────────────────────────────────────
+    # ORDEN CRÍTICO: renderizamos pestañas PRIMERO para que el usuario SIEMPRE
+    # vea la estructura (aunque haya un procesamiento IA en curso). El
+    # procesamiento pesado de _pending_query se hace DESPUÉS, dentro de un
+    # placeholder que queda arriba de las pestañas.
     #
-    # IMPORTANTE: Streamlit bufferiza st.markdown(html) y solo lo envía al navegador
-    # cuando termina el script. Por eso un overlay HTML custom NO se ve durante
-    # los 30s de procesamiento. La ÚNICA forma de mostrar progreso en vivo es
-    # usando st.status / st.spinner / st.write — esos sí hacen streaming.
-    _pending = st.session_state.pop("_pending_query", None)
-    if _pending:
-        # Banner visible arriba mientras procesa. Streamlit lo streamea al DOM.
-        st.markdown(
-            f"""
-            <div style="background: linear-gradient(135deg, #1e3a8a 0%, #2563eb 100%);
-                        color:#fff; padding:16px 20px; border-radius:12px;
-                        margin:8px 0 16px 0; box-shadow:0 6px 20px rgba(37,99,235,0.4);
-                        border-left:5px solid #60a5fa;">
-              <div style="font-weight:700; font-size:16px; letter-spacing:0.3px;">
-                🧠 Cerebro Forense investigando…
-              </div>
-              <div style="font-size:13px; opacity:0.92; margin-top:6px;">
-                Consultando 7 fuentes oficiales en paralelo. Esto toma <b>20-40 segundos</b>.
-                <b>No cierres la pestaña ni refresques</b> — el resultado aparecerá aquí mismo.
-              </div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-        # st.status hace streaming progresivo al navegador con cada st.write interno.
-        # Eso es lo que hace que el usuario VEA que el sistema está trabajando.
-        with st.status(f"🔍 Investigando: *{_pending[:80]}{'…' if len(_pending) > 80 else ''}*", expanded=True) as _status:
-            _process_ia_query(_pending, is_from_button=True, status_ctx=_status)
-            _status.update(label="✅ Investigación completada", state="complete", expanded=False)
+    # Streamlit bufferiza st.markdown(html) pero st.status/st.write SÍ hacen
+    # streaming progresivo al navegador. Por eso usamos st.status para feedback.
+    # ─────────────────────────────────────────────────────────────────────
 
-    # Toast + renderizar respuesta del ÚLTIMO botón Investigar INLINE arriba de las
-    # pestañas (el usuario la ve de inmediato sin cambiar de pestaña).
-    if st.session_state.pop("_ia_response_ready", False):
-        st.toast("Respuesta lista del Cerebro Forense", icon="🧠")
-
-    _last_btn_response = st.session_state.get("_last_button_response")
-    if _last_btn_response:
-        st.markdown(
-            """
-            <style>
-            .forensic-inline-response {
-                background: linear-gradient(135deg, #0b1e3f 0%, #102a52 100%);
-                border: 2px solid #4a90e2;
-                border-radius: 14px;
-                padding: 22px 26px;
-                margin: 12px 0 20px 0;
-                box-shadow: 0 8px 32px rgba(37, 99, 235, 0.25);
-            }
-            .forensic-inline-response h4 {
-                color: #60a5fa;
-                margin: 0 0 14px 0;
-                font-size: 1.05rem;
-                letter-spacing: 0.4px;
-                text-transform: uppercase;
-            }
-            .forensic-inline-response .query-echo {
-                color: #94a3b8;
-                font-size: 0.82rem;
-                font-style: italic;
-                margin-bottom: 12px;
-                padding: 8px 12px;
-                background: rgba(15, 23, 42, 0.5);
-                border-left: 3px solid #3b82f6;
-                border-radius: 6px;
-            }
-            </style>
-            """,
-            unsafe_allow_html=True,
-        )
-        with st.container(border=False):
-            st.markdown('<div class="forensic-inline-response">', unsafe_allow_html=True)
-            st.markdown("#### 🧠 Respuesta del Cerebro Forense")
-            _query_echo = _last_btn_response.get("query", "")
-            if _query_echo:
-                st.markdown(
-                    f'<div class="query-echo">🔍 {html_mod.escape(_query_echo)}</div>',
-                    unsafe_allow_html=True,
-                )
-            st.markdown(_last_btn_response.get("answer", ""))
-            _tools = _last_btn_response.get("tools", [])
-            if _tools:
-                badges_html = "".join(
-                    f'<span style="display:inline-block;background:rgba(37,99,235,0.15);'
-                    f'color:#60a5fa;font-size:11px;padding:3px 10px;border-radius:10px;'
-                    f'margin:4px 4px 0 0;">⚡ {html_mod.escape(t)}</span>'
-                    for t in _tools
-                )
-                st.markdown(
-                    f'<div style="margin-top:14px;padding-top:12px;border-top:1px solid rgba(59,130,246,0.2);">'
-                    f'<div style="color:#64748b;font-size:11px;margin-bottom:6px;text-transform:uppercase;letter-spacing:0.5px;">'
-                    f'Fuentes consultadas</div>{badges_html}</div>',
-                    unsafe_allow_html=True,
-                )
-            st.markdown('</div>', unsafe_allow_html=True)
-            col_a, col_b, _ = st.columns([1, 2, 4])
-            with col_a:
-                if st.button("✕ Cerrar", key="_close_inline_response", type="secondary"):
-                    st.session_state.pop("_last_button_response", None)
-                    st.rerun()
-            with col_b:
-                st.caption("💬 Historial completo en la pestaña **Asistente IA**")
+    # Placeholder arriba de las tabs donde va la respuesta inline + status
+    _inline_slot = st.empty()
 
     tab_estadisticas, tab_cruce, tab_servel, tab_registro, tab_medios, tab_mira, tab_analistas, tab_ia = st.tabs(tab_names)
 
-
-
     with tab_estadisticas:
         _render_tab_general(df_filtrado, total_gasto, total_oc, total_proveedores, total_compradores, pct_td, n_trato_directo)
-
     with tab_cruce:
         _render_tab_cruces(df_filtrado, total_proveedores, total_compradores, n_trato_directo, filtro_global)
-
     with tab_servel:
         _render_tab_servel(df_filtrado)
-
     with tab_registro:
         _render_tab_datos(df_filtrado, filtro_global)
-
     with tab_medios:
         _render_tab_fuentes(df_filtrado)
-
     with tab_mira:
         _render_tab_mira(df_filtrado)
-
     with tab_analistas:
         _render_tab_denuncias(df_filtrado)
-
     with tab_ia:
         ia_prompt = st.chat_input("¿Qué quieres investigar? (persona, empresa, organismo, anomalías...)")
         _render_tab_ia(df_filtrado, prompt=ia_prompt)
 
-    # ─────────────────────────────────────────────────────────────────────────
-    # COMPARTIR EN REDES SOCIALES
-    # ─────────────────────────────────────────────────────────────────────────
-    st.markdown("<div style='margin:32px 0 12px 0; border-top:1px solid rgba(51,65,85,0.3);'></div>", unsafe_allow_html=True)
+    # Ahora que las pestañas ya renderizaron, procesamos _pending_query (si hay)
+    # y rellenamos _inline_slot con el status/respuesta. Las pestañas ya son
+    # visibles y navegables mientras esto corre.
+    _pending = st.session_state.pop("_pending_query", None)
+    if _pending:
+        with _inline_slot.container():
+            st.markdown(
+                f"""
+                <div style="background: linear-gradient(135deg, #1e3a8a 0%, #2563eb 100%);
+                            color:#fff; padding:16px 20px; border-radius:12px;
+                            margin:8px 0 16px 0; box-shadow:0 6px 20px rgba(37,99,235,0.4);
+                            border-left:5px solid #60a5fa;">
+                  <div style="font-weight:700; font-size:16px;">🧠 Cerebro Forense investigando…</div>
+                  <div style="font-size:13px; opacity:0.92; margin-top:6px;">
+                    Consultando fuentes oficiales. Esto toma <b>20-40 segundos</b>.
+                    Puedes navegar entre pestañas mientras tanto — la respuesta aparecerá aquí arriba.
+                  </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+            with st.status(f"🔍 Investigando: *{_pending[:80]}{'…' if len(_pending) > 80 else ''}*", expanded=True) as _status:
+                _process_ia_query(_pending, is_from_button=True, status_ctx=_status)
+                _status.update(label="✅ Investigación completada", state="complete", expanded=False)
 
+    if st.session_state.pop("_ia_response_ready", False):
+        st.toast("Respuesta lista del Cerebro Forense", icon="🧠")
+
+    # Si ya hay una respuesta lista (del _pending_query que acabamos de procesar
+    # o de un render anterior), la mostramos inline ARRIBA en el placeholder.
+    _last_btn_response = st.session_state.get("_last_button_response")
+    if _last_btn_response and not _pending:
+        # Sólo si no acabamos de procesar un _pending (ya lo mostró arriba).
+        # Cuando _pending acaba, _last_button_response queda en state y en el
+        # próximo render entra acá.
+        with _inline_slot.container():
+            _render_inline_response(_last_btn_response)
+
+    # Footer (share + disclaimer) al final
+    _render_footer_share(total_oc, total_gasto)
+
+
+def _render_inline_response(_last_btn_response: dict) -> None:
+    """Renderiza el panel inline con la respuesta del Cerebro Forense."""
+    st.markdown(
+        """
+        <style>
+        .forensic-inline-response {
+            background: linear-gradient(135deg, #0b1e3f 0%, #102a52 100%);
+            border: 2px solid #4a90e2;
+            border-radius: 14px;
+            padding: 22px 26px;
+            margin: 12px 0 20px 0;
+            box-shadow: 0 8px 32px rgba(37, 99, 235, 0.25);
+        }
+        .forensic-inline-response h4 {
+            color: #60a5fa;
+            margin: 0 0 14px 0;
+            font-size: 1.05rem;
+            letter-spacing: 0.4px;
+            text-transform: uppercase;
+        }
+        .forensic-inline-response .query-echo {
+            color: #94a3b8;
+            font-size: 0.82rem;
+            font-style: italic;
+            margin-bottom: 12px;
+            padding: 8px 12px;
+            background: rgba(15, 23, 42, 0.5);
+            border-left: 3px solid #3b82f6;
+            border-radius: 6px;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+    st.markdown('<div class="forensic-inline-response">', unsafe_allow_html=True)
+    st.markdown("#### 🧠 Respuesta del Cerebro Forense")
+    _query_echo = _last_btn_response.get("query", "")
+    if _query_echo:
+        st.markdown(
+            f'<div class="query-echo">🔍 {html_mod.escape(_query_echo)}</div>',
+            unsafe_allow_html=True,
+        )
+    st.markdown(_last_btn_response.get("answer", ""))
+    _tools = _last_btn_response.get("tools", [])
+    if _tools:
+        badges_html = "".join(
+            f'<span style="display:inline-block;background:rgba(37,99,235,0.15);'
+            f'color:#60a5fa;font-size:11px;padding:3px 10px;border-radius:10px;'
+            f'margin:4px 4px 0 0;">⚡ {html_mod.escape(t)}</span>'
+            for t in _tools
+        )
+        st.markdown(
+            f'<div style="margin-top:14px;padding-top:12px;border-top:1px solid rgba(59,130,246,0.2);">'
+            f'<div style="color:#64748b;font-size:11px;margin-bottom:6px;text-transform:uppercase;letter-spacing:0.5px;">'
+            f'Fuentes consultadas</div>{badges_html}</div>',
+            unsafe_allow_html=True,
+        )
+    st.markdown('</div>', unsafe_allow_html=True)
+    col_a, col_b, _ = st.columns([1, 2, 4])
+    with col_a:
+        if st.button("✕ Cerrar", key="_close_inline_response", type="secondary"):
+            st.session_state.pop("_last_button_response", None)
+            st.rerun()
+    with col_b:
+        st.caption("💬 Historial completo en la pestaña **Asistente IA**")
+
+
+def _render_footer_share(total_oc: int, total_gasto: float) -> None:
+    """Renderiza el footer con botones de compartir y disclaimer legal."""
+    st.markdown("<div style='margin:32px 0 12px 0; border-top:1px solid rgba(51,65,85,0.3);'></div>", unsafe_allow_html=True)
     share_text = f"Encontré datos interesantes en Ojo del Pueblo: {total_oc:,} órdenes de compra por {format_clp(total_gasto)} bajo fiscalización ciudadana."
     encoded_text = urllib.parse.quote(share_text)
-
     col_share1, col_share2, col_share3 = st.columns(3)
     with col_share1:
         st.markdown(f"<a href='https://twitter.com/intent/tweet?text={encoded_text}' target='_blank' class='share-btn'>𝕏 Compartir en X</a>", unsafe_allow_html=True)

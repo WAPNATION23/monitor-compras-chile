@@ -2033,17 +2033,11 @@ def _render_tab_ia(df_filtrado, prompt=None):
 
 
 def _render_tab_ia_impl(df_filtrado, prompt=None):
-    # Marcador visible: si este header no aparece, algo revienta antes
-    # (aunque el try/except de arriba deberia atraparlo).
-    st.write("🤖 **Asistente IA**")
-    st.markdown(
-        '<div class="section-header">'
-        '<div class="icon blue">IA</div>'
-        '<div><h3>Cerebro Forense — Asistente de Investigación</h3>'
-        '<p>IA con acceso a 7 fuentes oficiales: Mercado Público, SERVEL, InfoLobby, '
-        'Contraloría, InfoProbidad, DIPRES y datos.gob. Cruce automático en cada consulta.</p></div>'
-        '</div>',
-        unsafe_allow_html=True,
+    # Header simple sin HTML custom para evitar cualquier riesgo de divs sueltos
+    st.subheader("🤖 Cerebro Forense — Asistente de Investigación")
+    st.caption(
+        "IA con acceso a 7 fuentes oficiales: Mercado Público, SERVEL, "
+        "InfoLobby, Contraloría, InfoProbidad, DIPRES y datos.gob."
     )
 
     # Check de configuración VISIBLE — si no hay API key, el usuario ve un
@@ -2697,22 +2691,11 @@ def main():
     with tab_analistas:
         _render_tab_denuncias(df_filtrado)
     with tab_ia:
-        # Marcador de diagnóstico: si este texto no aparece al abrir la
-        # pestaña, el problema es que Streamlit Cloud está sirviendo un
-        # commit viejo (cache) y hay que reboot desde el panel de la app.
-        st.markdown(
-            "<div style='padding:8px 12px; background:rgba(37,99,235,0.08); "
-            "border-left:4px solid #3b82f6; border-radius:6px; margin-bottom:12px; "
-            "color:#94a3b8; font-size:0.78rem;'>"
-            "✅ Asistente IA — build <code>f6ae08a+</code>"
-            "</div>",
-            unsafe_allow_html=True,
-        )
         try:
             _render_tab_ia(df_filtrado)
         except Exception as _tab_exc:  # noqa: BLE001
             import traceback as _tb
-            st.error(f"Fallo crítico en tab IA: `{type(_tab_exc).__name__}: {_tab_exc}`")
+            st.error(f"Fallo critico en tab IA: {type(_tab_exc).__name__}: {_tab_exc}")
             with st.expander("Traceback"):
                 st.code(_tb.format_exc(), language="python")
 

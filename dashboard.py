@@ -1950,7 +1950,23 @@ def _render_tab_servel(df_filtrado: pd.DataFrame):
         with sqlite3.connect(DB_NAME) as conn:
             total = conn.execute("SELECT COUNT(*) FROM aportes_servel").fetchone()[0]
             if total == 0:
-                st.warning("Tabla aportes_servel vacía. Ejecuta `py cargar_servel_auto.py`.")
+                st.warning("⚠️ La tabla `aportes_servel` está vacía.")
+                st.markdown(
+                    "Los datos SERVEL se cargan desde archivos XLSX publicados en "
+                    "`servel.cl`. Ejecuta uno de los siguientes:\n"
+                    "- **Local:** `py cargar_servel_auto.py` (aportes) y "
+                    "`py cargar_gastos_servel.py` (gastos)\n"
+                    "- **Cloud:** los datos se cargan automáticamente en cada despliegue "
+                    "cuando la BD está vacía."
+                )
+                if st.button("🔄 Intentar cargar ahora (local)", type="primary"):
+                    with st.spinner("Descargando archivos SERVEL..."):
+                        try:
+                            import cargar_servel_auto as _csa
+                            _csa.main()
+                            st.success("Carga completada. Refresca la página.")
+                        except Exception as exc:  # noqa: BLE001
+                            st.error(f"No se pudo cargar: {exc}")
                 return
 
             monto_total = conn.execute("SELECT COALESCE(SUM(monto_aporte), 0) FROM aportes_servel").fetchone()[0]

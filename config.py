@@ -73,6 +73,11 @@ FRACCIONAMIENTO_WINDOW_DAYS: int = 7       # Ventana de días para patrón de fr
 FRACCIONAMIENTO_MIN_OCS: int = 3           # Mínimo de compras en la ventana
 MIN_CATEGORIAS_FANTASMA: int = 4           # Categorías distintas para "empresa de papel"
 MIN_MONTO_SPIDER: int = 5_000_000          # CLP — monto mínimo para Red de Araña
+MONOPOLIO_PCT: float = 0.80                # Proveedor concentra >80% de las OCs de un organismo
+MONOPOLIO_MIN_OCS: int = 10                # Mínimo de OCs de ese comprador para aplicar la regla
+MONOPOLIO_MIN_MONTO: int = 50_000_000      # Monto mínimo agregado para alertar monopolio
+PROV_NUEVO_DIAS: int = 30                  # Proveedor con primera OC hace <N días
+PROV_NUEVO_MIN_MONTO: int = 20_000_000     # Y ya factura más de este monto => shell sospechosa
 DAILY_QUERY_LIMIT: int = 20               # Consultas IA por día por IP
 
 # ────────────────────── Notificaciones Telegram ───────────────────────────── #

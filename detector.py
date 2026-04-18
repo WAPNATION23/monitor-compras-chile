@@ -42,6 +42,11 @@ from config import (
     MIN_CATEGORIAS_FANTASMA,
     MIN_MONTO_SPIDER,
     MIN_OBSERVATIONS,
+    MONOPOLIO_MIN_MONTO,
+    MONOPOLIO_MIN_OCS,
+    MONOPOLIO_PCT,
+    PROV_NUEVO_DIAS,
+    PROV_NUEVO_MIN_MONTO,
     ZSCORE_THRESHOLD,
 )
 
@@ -313,6 +318,119 @@ class AnomalyDetector:
         outliers["motivo_alerta"] = "Servicio intangible millonario con monto sospechosamente cerrado"
         return outliers
 
+    # ──────────────────── Monopolio por Comprador ──────────────────── #
+
+    @staticmethod
+    def _detect_monopolio(df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Detecta proveedores que concentran un % desproporcionado de las OCs
+        de un mismo organismo. Señal de capitalismo de amigos / licitación
+        amañada.
+        """
+        required = {"nombre_comprador", "nombre_proveedor", "codigo_oc", "monto_total_item"}
+        if df.empty or not required.issubset(df.columns):
+            return pd.DataFrame()
+
+        work = df.dropna(subset=["nombre_comprador", "nombre_proveedor"]).copy()
+        if work.empty:
+            return pd.DataFrame()
+
+        # OCs por comprador (denominador)
+        total_ocs_comprador = (
+            work.drop_duplicates("codigo_oc")
+            .groupby("nombre_comprador")
+            .size()
+            .rename("total_ocs_comprador")
+        )
+
+        # OCs y montos por par (comprador, proveedor)
+        por_par = (
+            work.drop_duplicates(["codigo_oc", "nombre_proveedor"])
+            .groupby(["nombre_comprador", "nombre_proveedor"])
+            .agg(
+                ocs_del_proveedor=("codigo_oc", "nunique"),
+                monto_total=("monto_total_item", "sum"),
+            )
+            .reset_index()
+        )
+        por_par = por_par.join(total_ocs_comprador, on="nombre_comprador")
+        por_par["pct"] = por_par["ocs_del_proveedor"] / por_par["total_ocs_comprador"]
+
+        mask = (
+            (por_par["total_ocs_comprador"] >= MONOPOLIO_MIN_OCS)
+            & (por_par["pct"] >= MONOPOLIO_PCT)
+            & (por_par["monto_total"] >= MONOPOLIO_MIN_MONTO)
+        )
+        sospechosos = por_par[mask]
+        if sospechosos.empty:
+            return pd.DataFrame()
+
+        merged = work.merge(
+            sospechosos[["nombre_comprador", "nombre_proveedor", "pct", "ocs_del_proveedor", "total_ocs_comprador"]],
+            on=["nombre_comprador", "nombre_proveedor"],
+            how="inner",
+        ).copy()
+
+        merged["metodo"] = "Monopolio por Comprador"
+        pct_str = (merged["pct"] * 100).round(0).astype(int).astype(str)
+        ocs_str = merged["ocs_del_proveedor"].astype(int).astype(str)
+        tot_str = merged["total_ocs_comprador"].astype(int).astype(str)
+        merged["motivo_alerta"] = (
+            merged["nombre_proveedor"].astype(str)
+            + " concentra " + pct_str + "% ("
+            + ocs_str + "/" + tot_str + " OCs) de "
+            + merged["nombre_comprador"].astype(str)
+        )
+        return merged.drop(columns=["pct", "ocs_del_proveedor", "total_ocs_comprador"])
+
+    # ──────────────────── Proveedor Recién Nacido ──────────────────── #
+
+    @staticmethod
+    def _detect_proveedor_nuevo(df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Detecta proveedores cuya primera OC con el Estado es reciente pero
+        ya facturan montos altos: clásico patrón de empresa de papel creada
+        para recibir un contrato específico.
+        """
+        required = {"rut_proveedor", "nombre_proveedor", "fecha_creacion", "monto_total_item", "codigo_oc"}
+        if df.empty or not required.issubset(df.columns):
+            return pd.DataFrame()
+
+        work = df.dropna(subset=["rut_proveedor", "fecha_creacion"]).copy()
+        if work.empty:
+            return pd.DataFrame()
+
+        agg = (
+            work.groupby("rut_proveedor")
+            .agg(
+                primera_oc=("fecha_creacion", "min"),
+                monto_total=("monto_total_item", "sum"),
+                ocs=("codigo_oc", "nunique"),
+            )
+            .reset_index()
+        )
+
+        max_fecha = work["fecha_creacion"].max()
+        agg["dias_antiguedad"] = (max_fecha - agg["primera_oc"]).dt.days
+
+        mask = (agg["dias_antiguedad"] <= PROV_NUEVO_DIAS) & (agg["monto_total"] >= PROV_NUEVO_MIN_MONTO)
+        sospechosos = agg[mask]
+        if sospechosos.empty:
+            return pd.DataFrame()
+
+        merged = work.merge(
+            sospechosos[["rut_proveedor", "monto_total", "dias_antiguedad"]],
+            on="rut_proveedor",
+            how="inner",
+        ).copy()
+        merged["metodo"] = "Proveedor Recién Nacido"
+        dias_str = merged["dias_antiguedad"].astype(int).astype(str)
+        monto_str = merged["monto_total"].astype(int).map(lambda x: f"{x:,}")
+        merged["motivo_alerta"] = (
+            "Primer contrato hace " + dias_str + " días y ya facturó $" + monto_str + " CLP"
+        )
+        return merged.drop(columns=["monto_total", "dias_antiguedad"])
+
     # ──────────────────── Pipeline principal ──────────────────── #
 
     def detect(self, method: str = "serenata") -> pd.DataFrame:
@@ -380,6 +498,16 @@ class AnomalyDetector:
             spider_outliers = self._detect_spider(df)
             if not spider_outliers.empty:
                 anomalies.append(spider_outliers)
+
+            # Monopolio por Comprador
+            monopolio_outliers = self._detect_monopolio(df)
+            if not monopolio_outliers.empty:
+                anomalies.append(monopolio_outliers)
+
+            # Proveedor Recién Nacido
+            nuevo_outliers = self._detect_proveedor_nuevo(df)
+            if not nuevo_outliers.empty:
+                anomalies.append(nuevo_outliers)
 
         if not anomalies:
             logger.info("✓ No se detectaron anomalías con el método '%s'.", method)

@@ -651,6 +651,30 @@ def _render_caso_destacado(df: pd.DataFrame):
         unsafe_allow_html=True,
     )
 
+    # Construir proveedores recurrentes antes del banner (para inyectar al HTML)
+    provs = catering.groupby(['nombre_proveedor', 'rut_proveedor']).agg(
+        total=('total', 'sum'), n_oc=('codigo_oc', 'nunique')
+    ).reset_index().sort_values('total', ascending=False).head(4)
+
+    provs_html = ""
+    for _, p in provs.iterrows():
+        name_safe = html_mod.escape(str(p['nombre_proveedor'])[:50])
+        rut_safe = html_mod.escape(str(p['rut_proveedor']))
+        is_recurrente = p['n_oc'] >= 3
+        badge = ' · <span style="color:#F87171;font-weight:700;letter-spacing:0.04em;">RECURRENTE</span>' if is_recurrente else ''
+        provs_html += (
+            f'<div class="caso-proveedor">'
+            f'  <div>'
+            f'    <div class="prov-name">{name_safe}</div>'
+            f'    <div class="prov-detail">{rut_safe} · {int(p["n_oc"])} OC{badge}</div>'
+            f'  </div>'
+            f'  <div class="prov-monto">{format_clp(int(p["total"]))}</div>'
+            f'</div>'
+        )
+
+    # TODO el banner + hallazgos + proveedores en UN SOLO bloque HTML self-contained.
+    # Si partís divs en múltiples st.markdown, los </div> quedan stray y rompen el DOM
+    # de las pestañas hermanas (por eso antes "solo Cruces Forenses mostraba contenido").
     st.markdown(
         f'<div class="caso-banner">'
         f'  <h4>SEGPRES — La Moneda: catering, eventos y gasto sin licitación</h4>'
@@ -672,32 +696,11 @@ def _render_caso_destacado(df: pd.DataFrame):
         f'      <div class="caso-num">{format_clp(total_catering)}</div>'
         f'      <div class="caso-label">En comida y eventos</div>'
         f'    </div>'
-        f'  </div>',
+        f'  </div>'
+        f'  {provs_html}'
+        f'</div>',
         unsafe_allow_html=True,
     )
-
-    # Show top catering providers
-    provs = catering.groupby(['nombre_proveedor', 'rut_proveedor']).agg(
-        total=('total', 'sum'), n_oc=('codigo_oc', 'nunique')
-    ).reset_index().sort_values('total', ascending=False).head(4)
-
-    for _, p in provs.iterrows():
-        name_safe = html_mod.escape(str(p['nombre_proveedor'])[:50])
-        rut_safe = html_mod.escape(str(p['rut_proveedor']))
-        is_recurrente = p['n_oc'] >= 3
-        badge = ' · <span style="color:#F87171;font-weight:700;letter-spacing:0.04em;">RECURRENTE</span>' if is_recurrente else ''
-        st.markdown(
-            f'<div class="caso-proveedor">'
-            f'  <div>'
-            f'    <div class="prov-name">{name_safe}</div>'
-            f'    <div class="prov-detail">{rut_safe} · {int(p["n_oc"])} OC{badge}</div>'
-            f'  </div>'
-            f'  <div class="prov-monto">{format_clp(int(p["total"]))}</div>'
-            f'</div>',
-            unsafe_allow_html=True,
-        )
-
-    st.markdown('</div>', unsafe_allow_html=True)
 
     # Investigate buttons — derived from actual query results
     top_prov = provs.head(1)
@@ -1992,10 +1995,9 @@ def _render_tab_ia(df_filtrado, prompt=None):
         st.session_state.ia_tools_used = {}
 
     # ── Queries sugeridas ──
-    st.markdown(
-        '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:16px;">',
-        unsafe_allow_html=True,
-    )
+    # Los chips se renderizan con st.columns nativo; no envolver en <div>+</div>
+    # separados porque cada st.markdown es su propio contenedor Streamlit y los
+    # </div> quedan stray (rompe el DOM de las pestañas hermanas).
     _SUGGESTED_QUERIES = [
         ("Reporte ejecutivo", "Dame un reporte ejecutivo completo de la base de datos"),
         ("Top sospechosos", "¿Cuáles son los proveedores más sospechosos y por qué?"),
@@ -2009,7 +2011,6 @@ def _render_tab_ia(df_filtrado, prompt=None):
             if st.button(label, key=f"chip_{i}", use_container_width=True):
                 st.session_state["_pending_query"] = query
                 st.rerun()
-    st.markdown("</div>", unsafe_allow_html=True)
 
     # ── Definir renderer de burbujas ──
     def _render_chat_bubbles(messages: list[dict]) -> str:
@@ -2608,66 +2609,73 @@ def main():
 
 
 def _render_inline_response(_last_btn_response: dict) -> None:
-    """Renderiza el panel inline con la respuesta del Cerebro Forense."""
-    st.markdown(
-        """
-        <style>
-        .forensic-inline-response {
-            background: linear-gradient(135deg, #0b1e3f 0%, #102a52 100%);
-            border: 2px solid #4a90e2;
-            border-radius: 14px;
-            padding: 22px 26px;
-            margin: 12px 0 20px 0;
-            box-shadow: 0 8px 32px rgba(37, 99, 235, 0.25);
-        }
-        .forensic-inline-response h4 {
-            color: #60a5fa;
-            margin: 0 0 14px 0;
-            font-size: 1.05rem;
-            letter-spacing: 0.4px;
-            text-transform: uppercase;
-        }
-        .forensic-inline-response .query-echo {
-            color: #94a3b8;
-            font-size: 0.82rem;
-            font-style: italic;
-            margin-bottom: 12px;
-            padding: 8px 12px;
-            background: rgba(15, 23, 42, 0.5);
-            border-left: 3px solid #3b82f6;
-            border-radius: 6px;
-        }
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
-    st.markdown('<div class="forensic-inline-response">', unsafe_allow_html=True)
-    st.markdown("#### 🧠 Respuesta del Cerebro Forense")
-    _query_echo = _last_btn_response.get("query", "")
-    if _query_echo:
-        st.markdown(
-            f'<div class="query-echo">🔍 {html_mod.escape(_query_echo)}</div>',
-            unsafe_allow_html=True,
-        )
-    st.markdown(_last_btn_response.get("answer", ""))
-    _tools = _last_btn_response.get("tools", [])
-    if _tools:
-        badges_html = "".join(
+    """Renderiza el panel inline con la respuesta del Cerebro Forense.
+
+    IMPORTANTE: Todo el HTML va en UN SOLO st.markdown. Si abrimos un <div>
+    en un st.markdown y lo cerramos en otro, los </div> quedan sueltos en el
+    DOM y cierran contenedores padres prematuramente — eso rompe la
+    renderización de las pestañas que vienen después.
+    """
+    query_echo = html_mod.escape(_last_btn_response.get("query", ""))
+    answer_raw = _last_btn_response.get("answer", "") or ""
+    tools = _last_btn_response.get("tools", []) or []
+
+    # Convertir markdown básico del answer a HTML (bold + saltos de línea)
+    parts = re.split(r"(\*\*.+?\*\*)", answer_raw)
+    answer_rendered = "".join(
+        f"<strong>{html_mod.escape(p[2:-2])}</strong>"
+        if p.startswith("**") and p.endswith("**")
+        else html_mod.escape(p)
+        for p in parts
+    ).replace("\n", "<br>")
+
+    tools_html = ""
+    if tools:
+        badges = "".join(
             f'<span style="display:inline-block;background:rgba(37,99,235,0.15);'
             f'color:#60a5fa;font-size:11px;padding:3px 10px;border-radius:10px;'
             f'margin:4px 4px 0 0;">⚡ {html_mod.escape(t)}</span>'
-            for t in _tools
+            for t in tools
         )
-        st.markdown(
-            f'<div style="margin-top:14px;padding-top:12px;border-top:1px solid rgba(59,130,246,0.2);">'
-            f'<div style="color:#64748b;font-size:11px;margin-bottom:6px;text-transform:uppercase;letter-spacing:0.5px;">'
-            f'Fuentes consultadas</div>{badges_html}</div>',
-            unsafe_allow_html=True,
+        tools_html = (
+            '<div style="margin-top:14px;padding-top:12px;'
+            'border-top:1px solid rgba(59,130,246,0.2);">'
+            '<div style="color:#64748b;font-size:11px;margin-bottom:6px;'
+            'text-transform:uppercase;letter-spacing:0.5px;">'
+            f'Fuentes consultadas</div>{badges}</div>'
         )
-    st.markdown('</div>', unsafe_allow_html=True)
+
+    query_echo_html = (
+        f'<div style="color:#94a3b8;font-size:0.82rem;font-style:italic;'
+        f'margin-bottom:12px;padding:8px 12px;background:rgba(15,23,42,0.5);'
+        f'border-left:3px solid #3b82f6;border-radius:6px;">🔍 {query_echo}</div>'
+        if query_echo else ""
+    )
+
+    # TODO en un solo bloque HTML self-contained
+    st.markdown(
+        f"""
+        <div style="background: linear-gradient(135deg, #0b1e3f 0%, #102a52 100%);
+                    border: 2px solid #4a90e2; border-radius: 14px;
+                    padding: 22px 26px; margin: 12px 0 20px 0;
+                    box-shadow: 0 8px 32px rgba(37, 99, 235, 0.25);">
+          <div style="color:#60a5fa; margin:0 0 14px 0; font-size:1.05rem;
+                      letter-spacing:0.4px; text-transform:uppercase; font-weight:700;">
+            🧠 Respuesta del Cerebro Forense
+          </div>
+          {query_echo_html}
+          <div style="color:#e2e8f0; font-size:0.95rem; line-height:1.6;">
+            {answer_rendered}
+          </div>
+          {tools_html}
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    # Botón cerrar + caption en una fila APARTE (fuera del div custom)
     col_a, col_b, _ = st.columns([1, 2, 4])
     with col_a:
-        if st.button("✕ Cerrar", key="_close_inline_response", type="secondary"):
+        if st.button("✕ Cerrar respuesta", key="_close_inline_response", type="secondary"):
             st.session_state.pop("_last_button_response", None)
             st.rerun()
     with col_b:

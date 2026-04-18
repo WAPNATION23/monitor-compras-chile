@@ -71,6 +71,9 @@ _CREATE_INDEXES_SQL: list[str] = [
     "CREATE INDEX IF NOT EXISTS idx_rut_proveedor ON ordenes_items (rut_proveedor);",
     "CREATE INDEX IF NOT EXISTS idx_rut_comprador ON ordenes_items (rut_comprador);",
     "CREATE INDEX IF NOT EXISTS idx_fecha_creacion ON ordenes_items (fecha_creacion);",
+    # Crítico para cruce SERVEL vs. compras: sin este índice el JOIN por nombre
+    # convierte la query en un producto cartesiano (>100s en 54k filas).
+    "CREATE INDEX IF NOT EXISTS idx_nombre_proveedor ON ordenes_items (nombre_proveedor);",
 ]
 
 # Migración: agregar columnas si faltan (para BD existentes)

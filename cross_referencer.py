@@ -373,6 +373,10 @@ class CrossReferencer:
         Cruza los datos de aportes de campaña (SERVEL) vs. las órdenes de compra adjudicadas.
         Detecta casos donde un proveedor que donó dinero a una campaña (o partido) luego
         ganó una licitación o trato directo.
+
+        Nota (perf): SERVEL normalmente NO publica RUT del aportante, así que hacer
+        `ON REPLACE(rut) = REPLACE(rut) OR name = name` generaba un producto cartesiano
+        catastrófico (N>100s). Detectamos si hay RUTs y elegimos el plan correcto.
         """
         with sqlite3.connect(self.db_path) as conn:
             check_table = pd.read_sql_query(
@@ -382,7 +386,22 @@ class CrossReferencer:
             if check_table.empty:
                 return pd.DataFrame()
 
-            query = """
+            # Detectar si SERVEL entregó RUTs de aportantes. Si no, ir solo por nombre.
+            has_aportante_ruts = conn.execute(
+                "SELECT COUNT(*) FROM aportes_servel WHERE rut_aportante IS NOT NULL AND rut_aportante != ''"
+            ).fetchone()[0] > 0
+
+            if has_aportante_ruts:
+                join_condition = (
+                    "REPLACE(a.rut_aportante, '-', '') = REPLACE(o.rut_proveedor, '-', '') "
+                    "OR a.nombre_aportante = o.nombre_proveedor"
+                )
+            else:
+                # Sin RUTs: solo match por nombre exacto (usa idx_nombre_proveedor e
+                # idx_aportante_nombre). Evita el Cartesian join.
+                join_condition = "a.nombre_aportante = o.nombre_proveedor"
+
+            query = f"""
                 SELECT
                     a.rut_aportante as rut_proveedor_aportante,
                     a.nombre_aportante,
@@ -399,16 +418,16 @@ class CrossReferencer:
                     aportes_servel a
                 INNER JOIN
                     ordenes_items o
-                    ON (
-                        REPLACE(a.rut_aportante, '-', '') = REPLACE(o.rut_proveedor, '-', '')
-                        OR a.nombre_aportante = o.nombre_proveedor
-                    )
+                    ON ({join_condition})
                 WHERE
-                    a.monto_aporte > 0 AND o.monto_total_item > 0
+                    a.monto_aporte > 0
+                    AND o.monto_total_item > 0
+                    AND a.nombre_aportante != ''
                 GROUP BY
                     a.rut_aportante, a.nombre_aportante, a.rut_receptor, a.nombre_receptor, a.monto_aporte
                 ORDER BY
                     retorno_licitaciones DESC
+                LIMIT 500
             """
             try:
                 return pd.read_sql_query(query, conn)

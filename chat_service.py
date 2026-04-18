@@ -12,6 +12,7 @@ import logging
 import os
 import re
 import sqlite3
+import time
 from datetime import datetime
 
 import requests
@@ -24,6 +25,60 @@ logger = logging.getLogger(__name__)
 load_dotenv()
 
 DB_PATH = DB_NAME
+
+# ──────────────────────────────────────────────────────────────────────────
+# TTL CACHE — evita recalcular queries forenses pesadas en cada click.
+# Key: (function_name, *args). Value: (timestamp, result).
+# ──────────────────────────────────────────────────────────────────────────
+_CACHE: dict[tuple, tuple[float, object]] = {}
+_CACHE_TTL_SECONDS = 600  # 10 min
+
+
+def _cached(ttl: int = _CACHE_TTL_SECONDS):
+    """Decorador de cache TTL sencillo (thread-unsafe pero suficiente para Streamlit)."""
+    def deco(fn):
+        def wrapper(*args, **kwargs):
+            key = (fn.__name__, args, tuple(sorted(kwargs.items())))
+            now = time.time()
+            hit = _CACHE.get(key)
+            if hit is not None and (now - hit[0]) < ttl:
+                return hit[1]
+            result = fn(*args, **kwargs)
+            _CACHE[key] = (now, result)
+            return result
+        wrapper.__name__ = fn.__name__
+        return wrapper
+    return deco
+
+
+@_cached()
+def _cached_ranking_proveedores(top_n: int = 10):
+    from cross_referencer import CrossReferencer
+    return CrossReferencer(DB_PATH).ranking_proveedores_sospechosos(top_n=top_n)
+
+
+@_cached()
+def _cached_ranking_organismos():
+    from cross_referencer import CrossReferencer
+    return CrossReferencer(DB_PATH).ranking_riesgo_organismos()
+
+
+@_cached()
+def _cached_ratio_td():
+    from cross_referencer import CrossReferencer
+    return CrossReferencer(DB_PATH).ratio_tratos_directos()
+
+
+@_cached()
+def _cached_cruce_servel():
+    from cross_referencer import CrossReferencer
+    return CrossReferencer(DB_PATH).cruce_servel_compras()
+
+
+@_cached()
+def _cached_reporte_ejecutivo():
+    from cross_referencer import CrossReferencer
+    return CrossReferencer(DB_PATH).reporte_ejecutivo()
 
 _STOPWORDS = frozenset({
     "que", "para", "con", "los", "las", "del", "por", "una", "como", "este",
@@ -103,13 +158,10 @@ def _tool_person_search(prompt: str) -> tuple[str, str]:
 def _tool_anomaly_scan(prompt: str) -> tuple[str, str]:
     """Ejecuta detector de anomalías y cruza con personas."""
     try:
-        from cross_referencer import CrossReferencer
-        xref = CrossReferencer(DB_PATH)
-
         lines = ["### ANÁLISIS FORENSE DE ANOMALÍAS ###"]
 
-        # Top proveedores sospechosos
-        df_susp = xref.ranking_proveedores_sospechosos(top_n=10)
+        # Top proveedores sospechosos (cacheado 10 min)
+        df_susp = _cached_ranking_proveedores(top_n=10)
         if not df_susp.empty:
             lines.append("\n**TOP 10 PROVEEDORES SOSPECHOSOS (Score Compuesto):**")
             for _, row in df_susp.head(10).iterrows():
@@ -119,8 +171,8 @@ def _tool_anomaly_scan(prompt: str) -> tuple[str, str]:
                     f"Monto: ${row.get('monto_total', 0):,.0f} CLP"
                 )
 
-        # Organismos de mayor riesgo
-        df_org = xref.ranking_riesgo_organismos()
+        # Organismos de mayor riesgo (cacheado)
+        df_org = _cached_ranking_organismos()
         if not df_org.empty:
             lines.append("\n**TOP 5 ORGANISMOS DE MAYOR RIESGO:**")
             for _, row in df_org.head(5).iterrows():
@@ -131,8 +183,8 @@ def _tool_anomaly_scan(prompt: str) -> tuple[str, str]:
                     f"Monto: ${row.get('monto_total', 0):,.0f} CLP"
                 )
 
-        # Abuso de trato directo
-        df_td = xref.ratio_tratos_directos()
+        # Abuso de trato directo (cacheado)
+        df_td = _cached_ratio_td()
         if not df_td.empty:
             top_td = df_td[df_td["ratio_td"] > 80].head(5)
             if not top_td.empty:
@@ -153,9 +205,7 @@ def _tool_anomaly_scan(prompt: str) -> tuple[str, str]:
 def _tool_cross_servel(prompt: str) -> tuple[str, str]:
     """Cruza aportes SERVEL vs. adjudicaciones."""
     try:
-        from cross_referencer import CrossReferencer
-        xref = CrossReferencer(DB_PATH)
-        df = xref.cruce_servel_compras()
+        df = _cached_cruce_servel()
         if df.empty:
             return "Cruce SERVEL", "Sin datos SERVEL cargados o sin coincidencias detectadas."
         lines = ["### CRUCE SERVEL — Aportes electorales vs. Adjudicaciones ###"]
@@ -175,9 +225,7 @@ def _tool_cross_servel(prompt: str) -> tuple[str, str]:
 def _tool_executive_report() -> tuple[str, str]:
     """Genera reporte ejecutivo de la base de datos."""
     try:
-        from cross_referencer import CrossReferencer
-        xref = CrossReferencer(DB_PATH)
-        report = xref.reporte_ejecutivo()
+        report = _cached_reporte_ejecutivo()
         if not report:
             return "Reporte Ejecutivo", "Base de datos vacía."
         lines = ["### REPORTE EJECUTIVO ###"]
@@ -230,10 +278,8 @@ def _tool_infoprobidad(prompt: str) -> tuple[str, str]:
     """Busca conflictos de interés en InfoProbidad."""
     try:
         from infoprobidad_connector import InfoProbidadConnector
-        from cross_referencer import CrossReferencer
         ip = InfoProbidadConnector(DB_PATH)
-        xref = CrossReferencer(DB_PATH)
-        df_susp = xref.ranking_proveedores_sospechosos(top_n=5)
+        df_susp = _cached_ranking_proveedores(top_n=5)
         if df_susp.empty:
             return "InfoProbidad", "Sin proveedores para cruzar."
         nombres = df_susp["nombre_proveedor"].tolist()
@@ -352,11 +398,14 @@ def build_db_context(prompt: str) -> str:
 
 
 def build_web_context(prompt: str) -> str:
-    """Busca contexto web vía DuckDuckGo."""
+    """Busca contexto web vía DuckDuckGo. Timeout estricto para no bloquear el UI."""
+    # Permite desactivarla totalmente via env var (Streamlit Cloud a veces bloquea DDG)
+    if os.getenv("DISABLE_WEB_SEARCH", "").lower() in ("1", "true", "yes"):
+        return "[Búsqueda web desactivada por configuración.]"
     try:
         from duckduckgo_search import DDGS
 
-        with DDGS() as ddgs:
+        with DDGS(timeout=8) as ddgs:
             query_osint = f"{prompt} chile contraloria OR corrupcion OR fundaciones OR santiago"
             resultados = list(ddgs.text(query_osint, region="cl-es", safesearch="off", max_results=5))
             parts = []

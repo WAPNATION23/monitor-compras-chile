@@ -2429,11 +2429,22 @@ def main():
     # cuando el usuario está en otra pestaña).
     _pending = st.session_state.pop("_pending_query", None)
     if _pending:
-        # Scroll al tope + banner visible mientras procesa — crítico en móvil
-        # donde el usuario clickea un botón abajo y siente que la pantalla
-        # se congela sin feedback. Aquí forzamos que vea el st.status.
+        # Banner visible y prominente mientras el cerebro forense trabaja — evita
+        # que el usuario sienta que "no pasa nada" (la consulta toma 10-30s).
         st.markdown(
             """
+            <div style="background: linear-gradient(135deg, #1e3a8a 0%, #2563eb 100%);
+                        color:#fff; padding:14px 18px; border-radius:10px;
+                        margin:8px 0 16px 0; box-shadow:0 4px 16px rgba(37,99,235,0.35);
+                        border-left:4px solid #60a5fa;">
+              <div style="font-weight:700; font-size:15px; letter-spacing:0.3px;">
+                🧠 Cerebro Forense procesando…
+              </div>
+              <div style="font-size:13px; opacity:0.92; margin-top:4px;">
+                Consultando 7 fuentes (Mercado Público, SERVEL, InfoLobby, CGR, InfoProbidad, DIPRES, web).
+                La respuesta aparecerá en la pestaña <b>Asistente IA</b> al finalizar.
+              </div>
+            </div>
             <script>
             window.parent.scrollTo({top: 0, behavior: 'auto'});
             window.scrollTo({top: 0, behavior: 'auto'});
@@ -2471,13 +2482,24 @@ def main():
             </style>
             <div id="forensic-answer-anchor"></div>
             <script>
-            // Auto-scroll al panel en movil/desktop para que siempre sea visible.
+            // Auto-scroll al panel y auto-click a la pestaña "Asistente IA"
+            // para que el usuario vea el historial completo del chat forense.
             setTimeout(function() {
-                var el = window.parent.document.getElementById('forensic-answer-anchor')
-                    || document.getElementById('forensic-answer-anchor');
+                var doc = window.parent.document || document;
+                var el = doc.getElementById('forensic-answer-anchor');
                 if (el) el.scrollIntoView({behavior: 'smooth', block: 'start'});
                 window.parent.scrollTo({top: 0, behavior: 'smooth'});
-            }, 100);
+                // Auto-switch a la pestaña Asistente IA (última tab)
+                try {
+                    var tabs = doc.querySelectorAll('button[data-baseweb="tab"]');
+                    for (var i = 0; i < tabs.length; i++) {
+                        if (tabs[i].innerText && tabs[i].innerText.indexOf('Asistente') !== -1) {
+                            tabs[i].click();
+                            break;
+                        }
+                    }
+                } catch (e) { /* no-op */ }
+            }, 150);
             </script>
             """,
             unsafe_allow_html=True,

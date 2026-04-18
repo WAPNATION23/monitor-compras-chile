@@ -1894,6 +1894,14 @@ def _process_ia_query(effective_prompt: str, *, is_from_button: bool = False):
         _ia_msgs = st.session_state.get("ia_messages", [])
         if _ia_msgs and _ia_msgs[-1]["role"] == "assistant":
             st.session_state["_ia_response_ready"] = True
+            # Guardar la respuesta para renderizarla INLINE arriba de las pestañas
+            # en el próximo render (así el usuario la ve de inmediato sin tener
+            # que cambiar de pestaña y sin que el chat se vea "vacío").
+            st.session_state["_last_button_response"] = {
+                "query": effective_prompt,
+                "answer": _ia_msgs[-1]["content"],
+                "tools": tools_used,
+            }
         st.rerun()
 
 
@@ -2532,8 +2540,77 @@ def main():
     # que secuestre navegación). El usuario ve el toast y luego entra a la tab
     # Asistente IA cuando quiera.
     if st.session_state.pop("_ia_response_ready", False):
-        st.toast("Respuesta lista en la pestaña Asistente IA", icon="🧠")
-        st.success("✅ Cerebro Forense terminó. Abre la pestaña **Asistente IA** para ver el análisis completo.")
+        st.toast("Respuesta lista del Cerebro Forense", icon="🧠")
+
+    # Renderizar respuesta del ÚLTIMO botón Investigar directamente arriba de las
+    # pestañas (inline, sin JS, sin mandar al usuario a ningún lado). El historial
+    # completo sigue viviendo en la pestaña Asistente IA como siempre.
+    _last_btn_response = st.session_state.get("_last_button_response")
+    if _last_btn_response:
+        st.markdown(
+            """
+            <style>
+            .forensic-inline-response {
+                background: linear-gradient(135deg, #0b1e3f 0%, #102a52 100%);
+                border: 2px solid #4a90e2;
+                border-radius: 14px;
+                padding: 22px 26px;
+                margin: 12px 0 20px 0;
+                box-shadow: 0 8px 32px rgba(37, 99, 235, 0.25);
+            }
+            .forensic-inline-response h4 {
+                color: #60a5fa;
+                margin: 0 0 14px 0;
+                font-size: 1.05rem;
+                letter-spacing: 0.4px;
+                text-transform: uppercase;
+            }
+            .forensic-inline-response .query-echo {
+                color: #94a3b8;
+                font-size: 0.82rem;
+                font-style: italic;
+                margin-bottom: 12px;
+                padding: 8px 12px;
+                background: rgba(15, 23, 42, 0.5);
+                border-left: 3px solid #3b82f6;
+                border-radius: 6px;
+            }
+            </style>
+            """,
+            unsafe_allow_html=True,
+        )
+        with st.container(border=False):
+            st.markdown('<div class="forensic-inline-response">', unsafe_allow_html=True)
+            st.markdown("#### 🧠 Respuesta del Cerebro Forense")
+            _query_echo = _last_btn_response.get("query", "")
+            if _query_echo:
+                st.markdown(
+                    f'<div class="query-echo">🔍 {html_mod.escape(_query_echo)}</div>',
+                    unsafe_allow_html=True,
+                )
+            st.markdown(_last_btn_response.get("answer", ""))
+            _tools = _last_btn_response.get("tools", [])
+            if _tools:
+                badges_html = "".join(
+                    f'<span style="display:inline-block;background:rgba(37,99,235,0.15);'
+                    f'color:#60a5fa;font-size:11px;padding:3px 10px;border-radius:10px;'
+                    f'margin:4px 4px 0 0;">⚡ {html_mod.escape(t)}</span>'
+                    for t in _tools
+                )
+                st.markdown(
+                    f'<div style="margin-top:14px;padding-top:12px;border-top:1px solid rgba(59,130,246,0.2);">'
+                    f'<div style="color:#64748b;font-size:11px;margin-bottom:6px;text-transform:uppercase;letter-spacing:0.5px;">'
+                    f'Fuentes consultadas</div>{badges_html}</div>',
+                    unsafe_allow_html=True,
+                )
+            st.markdown('</div>', unsafe_allow_html=True)
+            col_a, col_b, _ = st.columns([1, 2, 4])
+            with col_a:
+                if st.button("✕ Cerrar", key="_close_inline_response", type="secondary"):
+                    st.session_state.pop("_last_button_response", None)
+                    st.rerun()
+            with col_b:
+                st.caption("💬 Historial completo en la pestaña **Asistente IA**")
 
     tab_estadisticas, tab_cruce, tab_servel, tab_registro, tab_medios, tab_mira, tab_analistas, tab_ia = st.tabs(tab_names)
 

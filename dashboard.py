@@ -2527,17 +2527,61 @@ def main():
     ]
 
     # ─────────────────────────────────────────────────────────────────────
-    # ORDEN CRÍTICO: renderizamos pestañas PRIMERO para que el usuario SIEMPRE
-    # vea la estructura (aunque haya un procesamiento IA en curso). El
-    # procesamiento pesado de _pending_query se hace DESPUÉS, dentro de un
-    # placeholder que queda arriba de las pestañas.
+    # ESTRATEGIA DE RENDERIZADO EN 2 MODOS
+    # ─────────────────────────────────────────────────────────────────────
+    # MODO A (procesando): si hay _pending_query, mostramos SOLO la pantalla
+    #   de procesamiento con st.status (que hace streaming progresivo real al
+    #   navegador). Al terminar, st.rerun() limpia el _pending y muestra el
+    #   dashboard completo con la respuesta inline.
     #
-    # Streamlit bufferiza st.markdown(html) pero st.status/st.write SÍ hacen
-    # streaming progresivo al navegador. Por eso usamos st.status para feedback.
+    # MODO B (normal): dashboard completo con todas las pestañas + respuesta
+    #   inline arriba si hay una respuesta lista de un click de Investigar.
+    #
+    # Por qué 2 modos y no 1: Streamlit bufferiza st.markdown HTML, así que
+    # cualquier overlay custom NO se ve durante los 30s de procesamiento.
+    # st.status con st.write progresivo SÍ se ve en vivo. Tabs y footer
+    # renderizan bloqueados hasta que el script termina — por eso los
+    # separamos en su propio pass.
     # ─────────────────────────────────────────────────────────────────────
 
-    # Placeholder arriba de las tabs donde va la respuesta inline + status
-    _inline_slot = st.empty()
+    _pending = st.session_state.pop("_pending_query", None)
+    if _pending:
+        # ── MODO A: pantalla de procesamiento ──
+        st.markdown(
+            f"""
+            <div style="background: linear-gradient(135deg, #1e3a8a 0%, #2563eb 100%);
+                        color:#fff; padding:20px 24px; border-radius:14px;
+                        margin:16px 0 20px 0; box-shadow:0 8px 24px rgba(37,99,235,0.4);
+                        border-left:6px solid #60a5fa;">
+              <div style="font-weight:700; font-size:18px;">🧠 Cerebro Forense investigando</div>
+              <div style="font-size:13px; opacity:0.92; margin-top:8px;">
+                Consultando fuentes oficiales. Esto toma <b>20-40 segundos</b>.
+                No cierres la pestaña — al terminar vuelve al dashboard automáticamente.
+              </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        with st.status(
+            f"🔍 Investigando: *{_pending[:80]}{'…' if len(_pending) > 80 else ''}*",
+            expanded=True,
+        ) as _status:
+            _process_ia_query(_pending, is_from_button=True, status_ctx=_status)
+            _status.update(label="✅ Investigación completada", state="complete", expanded=False)
+        # Al terminar, rerun al MODO B donde se muestra la respuesta inline +
+        # todas las pestañas con contenido completo.
+        st.rerun()
+
+    # ── MODO B: dashboard completo ──
+
+    # Toast único cuando recién viene una respuesta lista
+    if st.session_state.pop("_ia_response_ready", False):
+        st.toast("Respuesta lista del Cerebro Forense", icon="🧠")
+
+    # Respuesta inline arriba de las pestañas (si hay una del último Investigar)
+    _last_btn_response = st.session_state.get("_last_button_response")
+    if _last_btn_response:
+        _render_inline_response(_last_btn_response)
 
     tab_estadisticas, tab_cruce, tab_servel, tab_registro, tab_medios, tab_mira, tab_analistas, tab_ia = st.tabs(tab_names)
 
@@ -2559,45 +2603,7 @@ def main():
         ia_prompt = st.chat_input("¿Qué quieres investigar? (persona, empresa, organismo, anomalías...)")
         _render_tab_ia(df_filtrado, prompt=ia_prompt)
 
-    # Ahora que las pestañas ya renderizaron, procesamos _pending_query (si hay)
-    # y rellenamos _inline_slot con el status/respuesta. Las pestañas ya son
-    # visibles y navegables mientras esto corre.
-    _pending = st.session_state.pop("_pending_query", None)
-    if _pending:
-        with _inline_slot.container():
-            st.markdown(
-                f"""
-                <div style="background: linear-gradient(135deg, #1e3a8a 0%, #2563eb 100%);
-                            color:#fff; padding:16px 20px; border-radius:12px;
-                            margin:8px 0 16px 0; box-shadow:0 6px 20px rgba(37,99,235,0.4);
-                            border-left:5px solid #60a5fa;">
-                  <div style="font-weight:700; font-size:16px;">🧠 Cerebro Forense investigando…</div>
-                  <div style="font-size:13px; opacity:0.92; margin-top:6px;">
-                    Consultando fuentes oficiales. Esto toma <b>20-40 segundos</b>.
-                    Puedes navegar entre pestañas mientras tanto — la respuesta aparecerá aquí arriba.
-                  </div>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-            with st.status(f"🔍 Investigando: *{_pending[:80]}{'…' if len(_pending) > 80 else ''}*", expanded=True) as _status:
-                _process_ia_query(_pending, is_from_button=True, status_ctx=_status)
-                _status.update(label="✅ Investigación completada", state="complete", expanded=False)
-
-    if st.session_state.pop("_ia_response_ready", False):
-        st.toast("Respuesta lista del Cerebro Forense", icon="🧠")
-
-    # Si ya hay una respuesta lista (del _pending_query que acabamos de procesar
-    # o de un render anterior), la mostramos inline ARRIBA en el placeholder.
-    _last_btn_response = st.session_state.get("_last_button_response")
-    if _last_btn_response and not _pending:
-        # Sólo si no acabamos de procesar un _pending (ya lo mostró arriba).
-        # Cuando _pending acaba, _last_button_response queda en state y en el
-        # próximo render entra acá.
-        with _inline_slot.container():
-            _render_inline_response(_last_btn_response)
-
-    # Footer (share + disclaimer) al final
+    # Footer (share + disclaimer)
     _render_footer_share(total_oc, total_gasto)
 
 

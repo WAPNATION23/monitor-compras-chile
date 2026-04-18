@@ -1878,6 +1878,10 @@ def _process_ia_query(effective_prompt: str, *, is_from_button: bool = False):
         if _ia_msgs and _ia_msgs[-1]["role"] == "assistant":
             st.session_state["_ia_modal_content"] = _ia_msgs[-1]["content"]
             st.session_state["_ia_modal_open"] = True
+            # Dispara el auto-switch a la pestaña IA SOLO en el próximo render.
+            # El flag se consume con .pop() para que no vuelva a saltar en
+            # reruns posteriores (si no, secuestra la navegación).
+            st.session_state["_ia_autoswitch_pending"] = True
         st.rerun()
 
 
@@ -2474,6 +2478,11 @@ def main():
     # arriba de las pestañas y SOLO se cierra con el botón explícito (no se
     # descarta al hacer click fuera ni al scrollear, a diferencia de st.dialog).
     if st.session_state.get("_ia_modal_open"):
+        # Auto-switch a la pestaña Asistente IA SOLO la primera vez que aparece el
+        # panel. Si lo dejamos activo en cada rerun, el JS hace click en la tab IA
+        # cada vez que el usuario intenta navegar a otra pestaña (Cruces, Mira,
+        # Fuentes...) y las pestañas "no cargan" porque vuelven a IA.
+        _do_autoswitch = st.session_state.pop("_ia_autoswitch_pending", False)
         st.markdown(
             """
             <style>
@@ -2497,29 +2506,35 @@ def main():
             }
             </style>
             <div id="forensic-answer-anchor"></div>
-            <script>
-            // Auto-scroll al panel y auto-click a la pestaña "Asistente IA"
-            // para que el usuario vea el historial completo del chat forense.
-            setTimeout(function() {
-                var doc = window.parent.document || document;
-                var el = doc.getElementById('forensic-answer-anchor');
-                if (el) el.scrollIntoView({behavior: 'smooth', block: 'start'});
-                window.parent.scrollTo({top: 0, behavior: 'smooth'});
-                // Auto-switch a la pestaña Asistente IA (última tab)
-                try {
-                    var tabs = doc.querySelectorAll('button[data-baseweb="tab"]');
-                    for (var i = 0; i < tabs.length; i++) {
-                        if (tabs[i].innerText && tabs[i].innerText.indexOf('Asistente') !== -1) {
-                            tabs[i].click();
-                            break;
-                        }
-                    }
-                } catch (e) { /* no-op */ }
-            }, 150);
-            </script>
             """,
             unsafe_allow_html=True,
         )
+        if _do_autoswitch:
+            st.markdown(
+                """
+                <script>
+                // Auto-scroll al panel y auto-click a la pestaña "Asistente IA"
+                // SOLO una vez (justo cuando acaba de llegar la respuesta),
+                // para no secuestrar la navegación del usuario a otras pestañas.
+                setTimeout(function() {
+                    var doc = window.parent.document || document;
+                    var el = doc.getElementById('forensic-answer-anchor');
+                    if (el) el.scrollIntoView({behavior: 'smooth', block: 'start'});
+                    window.parent.scrollTo({top: 0, behavior: 'smooth'});
+                    try {
+                        var tabs = doc.querySelectorAll('button[data-baseweb="tab"]');
+                        for (var i = 0; i < tabs.length; i++) {
+                            if (tabs[i].innerText && tabs[i].innerText.indexOf('Asistente') !== -1) {
+                                tabs[i].click();
+                                break;
+                            }
+                        }
+                    } catch (e) { /* no-op */ }
+                }, 150);
+                </script>
+                """,
+                unsafe_allow_html=True,
+            )
         with st.container(border=False):
             st.markdown('<div class="forensic-answer-panel">', unsafe_allow_html=True)
             st.markdown("#### Respuesta del Cerebro Forense")

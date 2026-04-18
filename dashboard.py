@@ -240,30 +240,6 @@ _CUSTOM_CSS: str = """
         background: rgba(30, 41, 59, 0.8); color: #F1F5F9 !important;
         border-color: rgba(59, 130, 246, 0.4);
     }
-    .stTabs [data-baseweb="tab-list"] {
-        gap: 2px; background: transparent; padding-bottom: 0;
-        border-bottom: 2px solid rgba(30, 41, 59, 0.6);
-        flex-wrap: wrap;
-        overflow-x: visible !important;
-        overflow-y: visible !important;
-        height: auto !important;
-        min-height: 44px;
-        max-height: none !important;
-    }
-    .stTabs [data-baseweb="tab-list"] button[role="tab"] { flex: 1 1 auto; min-width: 0; }
-    .stTabs [data-baseweb="tab"] {
-        background: transparent; border: none;
-        border-bottom: 2px solid transparent;
-        padding: 10px 14px; transition: all 0.2s ease; color: #64748B;
-        font-weight: 600; border-radius: 0;
-        font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.04em;
-        white-space: nowrap;
-    }
-    .stTabs [data-baseweb="tab"]:hover { color: #94A3B8; }
-    .stTabs [aria-selected="true"] {
-        background: transparent !important; color: #3B82F6 !important;
-        border-bottom: 2px solid #3B82F6 !important;
-    }
     [data-testid="stDataFrame"] {
         border-radius: 12px; border: 1px solid rgba(51, 65, 85, 0.4); overflow: hidden;
     }

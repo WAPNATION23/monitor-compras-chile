@@ -1816,31 +1816,46 @@ def _process_ia_query(effective_prompt: str, *, is_from_button: bool = False):
         tools_used: list[str] = []
     else:
         try:
-            with st.status("Cerebro Forense procesando la consulta…", expanded=True) as status:
+            if is_from_button:
+                # Cuando viene de un botón, el overlay full-screen ya muestra el
+                # estado. Procesamos silenciosamente para no ensuciar el área
+                # arriba de las pestañas con st.status/st.write residuales.
                 intents = classify_intent(effective_prompt)
-                intent_labels = {"persona": "Persona", "proveedor": "Proveedor",
-                                 "organismo": "Organismo", "anomalia": "Anomalía",
-                                 "resumen": "Resumen", "general": "General"}
-                detected = ", ".join(intent_labels.get(i, i) for i in intents)
-                st.write(f"Intención detectada: **{detected}**")
-
-                st.write("Ejecutando herramientas forenses…")
                 forensic_context, tools_used = build_forensic_context(effective_prompt)
-
-                st.write("Escaneando base de datos local…")
                 db_context = build_db_context(effective_prompt)
                 tools_used.append("DB Local")
-
-                st.write("Buscando información en la web…")
                 web_context = build_web_context(effective_prompt)
                 tools_used.append("Web OSINT")
-
-                st.write("Analizando con Cerebro Forense…")
                 revelacion = call_deepseek(
                     st.session_state.ia_messages, web_context, db_context,
                     forensic_context
                 )
-                status.update(label="Consulta procesada", state="complete", expanded=False)
+            else:
+                with st.status("Cerebro Forense procesando la consulta…", expanded=True) as status:
+                    intents = classify_intent(effective_prompt)
+                    intent_labels = {"persona": "Persona", "proveedor": "Proveedor",
+                                     "organismo": "Organismo", "anomalia": "Anomalía",
+                                     "resumen": "Resumen", "general": "General"}
+                    detected = ", ".join(intent_labels.get(i, i) for i in intents)
+                    st.write(f"Intención detectada: **{detected}**")
+
+                    st.write("Ejecutando herramientas forenses…")
+                    forensic_context, tools_used = build_forensic_context(effective_prompt)
+
+                    st.write("Escaneando base de datos local…")
+                    db_context = build_db_context(effective_prompt)
+                    tools_used.append("DB Local")
+
+                    st.write("Buscando información en la web…")
+                    web_context = build_web_context(effective_prompt)
+                    tools_used.append("Web OSINT")
+
+                    st.write("Analizando con Cerebro Forense…")
+                    revelacion = call_deepseek(
+                        st.session_state.ia_messages, web_context, db_context,
+                        forensic_context
+                    )
+                    status.update(label="Consulta procesada", state="complete", expanded=False)
         except (requests.RequestException, KeyError, ValueError) as ia_exc:
             revelacion = f"Error al consultar el asistente IA: {ia_exc}"
             tools_used = []
@@ -2446,8 +2461,72 @@ def main():
     # cuando el usuario está en otra pestaña).
     _pending = st.session_state.pop("_pending_query", None)
     if _pending:
-        with st.spinner("🧠 Cerebro Forense procesando — consultando 7 fuentes (Mercado Público, SERVEL, InfoLobby, CGR, InfoProbidad, DIPRES, web)…"):
-            _process_ia_query(_pending, is_from_button=True)
+        # Overlay a pantalla completa IMPOSIBLE de ignorar — evita que el usuario
+        # piense que "se fue el net" mientras la IA tarda 10-40s. Se auto-elimina
+        # cuando el script termina y Streamlit re-renderiza la página.
+        st.markdown(
+            """
+            <style>
+            #forensic-overlay {
+                position: fixed; inset: 0; z-index: 999999;
+                background: rgba(2, 6, 23, 0.92);
+                display: flex; align-items: center; justify-content: center;
+                flex-direction: column;
+                backdrop-filter: blur(8px);
+                animation: fadein 0.2s ease-in;
+            }
+            @keyframes fadein { from { opacity: 0; } to { opacity: 1; } }
+            #forensic-overlay .box {
+                background: linear-gradient(135deg, #0b1e3f 0%, #1e3a8a 100%);
+                border: 2px solid #60a5fa;
+                border-radius: 16px;
+                padding: 32px 40px;
+                max-width: 520px;
+                text-align: center;
+                box-shadow: 0 20px 60px rgba(37, 99, 235, 0.4);
+            }
+            #forensic-overlay .spinner {
+                width: 64px; height: 64px;
+                border: 5px solid rgba(96, 165, 250, 0.2);
+                border-top-color: #60a5fa;
+                border-radius: 50%;
+                animation: spin 0.9s linear infinite;
+                margin: 0 auto 20px auto;
+            }
+            @keyframes spin { to { transform: rotate(360deg); } }
+            #forensic-overlay h2 {
+                color: #f8fafc; margin: 0 0 12px 0;
+                font-size: 22px; font-weight: 700;
+                letter-spacing: 0.3px;
+            }
+            #forensic-overlay p {
+                color: #cbd5e1; margin: 6px 0; font-size: 14px;
+                line-height: 1.55;
+            }
+            #forensic-overlay .sources {
+                color: #94a3b8; font-size: 12px; margin-top: 14px;
+                letter-spacing: 0.3px;
+            }
+            #forensic-overlay .tip {
+                color: #fbbf24; font-size: 12px; margin-top: 18px;
+                font-weight: 600;
+            }
+            </style>
+            <div id="forensic-overlay">
+              <div class="box">
+                <div class="spinner"></div>
+                <h2>🧠 Cerebro Forense investigando…</h2>
+                <p>Cruzando datos en tiempo real. Esto puede tardar <b>20-40 segundos</b>.</p>
+                <div class="sources">
+                  Mercado Público · SERVEL · InfoLobby · CGR · InfoProbidad · DIPRES · Web OSINT
+                </div>
+                <div class="tip">⏳ No cierres la pestaña ni refresques.</div>
+              </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        _process_ia_query(_pending, is_from_button=True)
 
     # Aviso compacto cuando acaba de llegar una respuesta (sin panel modal ni JS
     # que secuestre navegación). El usuario ve el toast y luego entra a la tab

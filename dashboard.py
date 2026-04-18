@@ -66,9 +66,19 @@ _CUSTOM_CSS: str = """
     h3 { font-size: 1.15rem; margin-bottom: 4px; }
     h4 { font-size: 0.95rem; font-weight: 600; color: #94A3B8 !important; }
     [data-testid="stMetricValue"] {
-        font-size: 1.6rem; font-weight: 800;
+        font-size: 1.45rem; font-weight: 800;
         color: #F8FAFC !important;
         background: none; -webkit-text-fill-color: #F8FAFC;
+        white-space: normal !important;
+        overflow: visible !important;
+        text-overflow: clip !important;
+        line-height: 1.15;
+        word-break: break-word;
+    }
+    [data-testid="stMetricValue"] > div {
+        white-space: normal !important;
+        overflow: visible !important;
+        text-overflow: clip !important;
     }
     [data-testid="stMetricLabel"] {
         font-size: 0.7rem; color: #64748B !important;
@@ -80,6 +90,8 @@ _CUSTOM_CSS: str = """
         padding: 16px 14px; border-radius: 12px;
         backdrop-filter: blur(8px);
         transition: border-color 0.2s ease;
+        min-width: 0;
+        overflow: visible;
     }
     div[data-testid="metric-container"]:hover { border-color: rgba(59, 130, 246, 0.5); }
     .stChatInput { border-color: #1E293B !important; }
@@ -680,7 +692,11 @@ def _render_tab_general(df_filtrado, total_gasto, total_oc, total_proveedores, t
     kpi1, kpi2, kpi3, kpi4, kpi5 = st.columns(5)
 
     with kpi1:
-        st.metric("Gasto Escaneado", format_clp(total_gasto), help="Suma de todas las OC cargadas")
+        st.metric(
+            "Gasto Escaneado",
+            format_clp(total_gasto),
+            help=f"Monto exacto: {format_clp_full(total_gasto)} CLP — Suma de todas las OC cargadas",
+        )
     with kpi2:
         st.metric("Ordenes de Compra", f"{total_oc:,}", help="Cantidad de OC únicas")
     with kpi3:
@@ -2024,7 +2040,7 @@ def _render_tab_servel(df_filtrado: pd.DataFrame):
 
             k1, k2, k3, k4 = st.columns(4)
             k1.metric("Aportes registrados", f"{total:,}".replace(",", "."))
-            k2.metric("Monto total", f"${monto_total/1e9:,.2f} MMM")
+            k2.metric("Monto total", format_clp(monto_total), help=f"Monto exacto: {format_clp_full(monto_total)} CLP")
             k3.metric("Aportantes únicos", f"{n_aportantes:,}".replace(",", "."))
             k4.metric("Receptores únicos", f"{n_receptores:,}".replace(",", "."))
 
@@ -2133,7 +2149,7 @@ def _render_tab_servel(df_filtrado: pd.DataFrame):
                 n_provs = conn.execute("SELECT COUNT(DISTINCT rut_proveedor) FROM gastos_servel WHERE rut_proveedor != ''").fetchone()[0]
                 g1, g2, g3 = st.columns(3)
                 g1.metric("Gastos registrados", f"{n_gastos:,}".replace(",", "."))
-                g2.metric("Monto total facturado", f"${monto_gastos/1e9:,.2f} MMM")
+                g2.metric("Monto total facturado", format_clp(monto_gastos), help=f"Monto exacto: {format_clp_full(monto_gastos)} CLP")
                 g3.metric("Proveedores únicos (RUT)", f"{n_provs:,}".replace(",", "."))
 
                 st.markdown("### 🚨 Cruce RUT EXACTO: proveedor de campaña + proveedor del Estado")

@@ -128,14 +128,21 @@ def increment_rate_limit_usage(ip: str, fecha: str) -> None:
 
 
 def format_clp(value: float) -> str:
-    """Formato corto de montos CLP (ej. $175.4 Mil M CLP)."""
+    """Formato corto de montos CLP.
+
+    Muestra siempre la cifra completa en millones con separador de miles,
+    para que no haya ambigüedad entre 'miles de millones' y 'millones'.
+    Ej: 175_400_000_000 -> '$175.400 M CLP' (175.400 millones = 175 mil millones).
+    """
     abs_val = abs(value)
     if abs_val >= 1_000_000_000_000:
-        return f"${value / 1_000_000_000_000:,.1f}B CLP"
-    elif abs_val >= 1_000_000_000:
-        return f"${value / 1_000_000_000:,.1f} Mil M CLP"
+        # Billones (millones de millones): $1,5 B = $1.500.000 M
+        entero = f"{value / 1_000_000_000_000:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+        return f"${entero} B CLP"
     elif abs_val >= 1_000_000:
-        return f"${value / 1_000_000:,.0f}M CLP"
+        # Siempre en millones con separador de miles estilo Chile: $175.423 M
+        millones = f"{value / 1_000_000:,.0f}".replace(",", ".")
+        return f"${millones} M CLP"
     else:
         return f"${value:,.0f} CLP".replace(",", ".")
 

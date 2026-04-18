@@ -264,7 +264,6 @@ _CUSTOM_CSS: str = """
         background: transparent !important; color: #3B82F6 !important;
         border-bottom: 2px solid #3B82F6 !important;
     }
-    .stTabs [data-baseweb="tab-list"] > div[role="presentation"] { display: none !important; }
     [data-testid="stDataFrame"] {
         border-radius: 12px; border: 1px solid rgba(51, 65, 85, 0.4); overflow: hidden;
     }
@@ -2603,37 +2602,6 @@ def main():
     pct_td = (n_trato_directo / total_oc * 100) if total_oc > 0 else 0
 
     # ─────────────────────────────────────────────────────────────────────────
-    # DIAGNOSTICO VISIBLE (temporal - remover cuando se valide prod)
-    # ─────────────────────────────────────────────────────────────────────────
-    with st.expander("🩺 Diagnostico (click para abrir)", expanded=False):
-        import streamlit as _st
-        try:
-            _commit = os.popen("git rev-parse --short HEAD").read().strip() or "n/a"
-        except Exception:  # noqa: BLE001
-            _commit = "n/a"
-        st.write({
-            "streamlit_version": _st.__version__,
-            "commit": _commit,
-            "db_path": str(DB_PATH),
-            "db_exists": os.path.exists(DB_PATH),
-            "db_size_bytes": os.path.getsize(DB_PATH) if os.path.exists(DB_PATH) else 0,
-            "df_rows": len(df),
-            "df_cols": list(df.columns) if not df.empty else [],
-            "df_filtrado_rows": len(df_filtrado),
-            "total_gasto": float(total_gasto),
-            "total_oc": int(total_oc),
-            "filtro_global": filtro_global or "",
-            "filtro_tipo": list(filtro_tipo) if filtro_tipo else [],
-            "filtro_comprador": list(filtro_comprador) if filtro_comprador else [],
-            "filtro_cat": list(filtro_cat) if filtro_cat else [],
-            "filtro_fecha": str(filtro_fecha),
-            "filtro_monto_min": filtro_monto_min,
-        })
-        if st.button("Limpiar cache de datos y recargar", key="_diag_clear_cache"):
-            _cached_load.clear()
-            st.rerun()
-
-    # ─────────────────────────────────────────────────────────────────────────
     # ENRUTAMIENTO POR PESTAÑAS (Limpieza Visual)
     # ─────────────────────────────────────────────────────────────────────────
 
@@ -2710,7 +2678,6 @@ def main():
     def _safe_tab(label, render_fn, *args, **kwargs):
         """Ejecuta el render de un tab atrapando cualquier excepcion para que
         no propague y deje las demas tabs sin renderizar."""
-        st.caption(f"▸ Tab: {label} · df_filtrado={len(df_filtrado)} filas")
         try:
             render_fn(*args, **kwargs)
         except Exception as _exc:  # noqa: BLE001

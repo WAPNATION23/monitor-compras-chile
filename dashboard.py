@@ -243,15 +243,20 @@ _CUSTOM_CSS: str = """
     .stTabs [data-baseweb="tab-list"] {
         gap: 2px; background: transparent; padding-bottom: 0;
         border-bottom: 2px solid rgba(30, 41, 59, 0.6);
-        flex-wrap: wrap; overflow-x: visible !important;
+        flex-wrap: wrap;
+        overflow-x: visible !important;
+        overflow-y: visible !important;
+        height: auto !important;
+        min-height: 44px;
+        max-height: none !important;
     }
     .stTabs [data-baseweb="tab-list"] button[role="tab"] { flex: 1 1 auto; min-width: 0; }
     .stTabs [data-baseweb="tab"] {
         background: transparent; border: none;
         border-bottom: 2px solid transparent;
-        padding: 10px 18px; transition: all 0.2s ease; color: #64748B;
+        padding: 10px 14px; transition: all 0.2s ease; color: #64748B;
         font-weight: 600; border-radius: 0;
-        font-size: 0.82rem; text-transform: uppercase; letter-spacing: 0.06em;
+        font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.04em;
         white-space: nowrap;
     }
     .stTabs [data-baseweb="tab"]:hover { color: #94A3B8; }
@@ -2012,6 +2017,22 @@ def _process_ia_query(effective_prompt: str, *, is_from_button: bool = False, st
 
 
 def _render_tab_ia(df_filtrado, prompt=None):
+    """Wrapper con try/except para que una excepción nunca deje la pestaña vacía."""
+    try:
+        _render_tab_ia_impl(df_filtrado, prompt=prompt)
+    except Exception as exc:  # noqa: BLE001
+        import traceback
+        logger.exception("Error renderizando Asistente IA")
+        st.error(
+            "⚠️ **El Asistente IA se cayó renderizando la pestaña.**\n\n"
+            f"Error: `{type(exc).__name__}: {exc}`\n\n"
+            "Esto NO debería pasar. Captura de pantalla del traceback de abajo y reporta."
+        )
+        with st.expander("Traceback técnico (click para expandir)", expanded=False):
+            st.code(traceback.format_exc(), language="python")
+
+
+def _render_tab_ia_impl(df_filtrado, prompt=None):
     st.markdown(
         '<div class="section-header">'
         '<div class="icon blue">IA</div>'
@@ -2137,9 +2158,24 @@ def _render_tab_ia(df_filtrado, prompt=None):
     daily_limit = DAILY_QUERY_LIMIT
     remaining = max(0, daily_limit - daily_used)
 
-    # ── Procesar prompt del chat_input (los _pending_query ya se procesan en main()) ──
-    if prompt:
-        _process_ia_query(prompt)
+    # ── Input de consulta (dentro del tab, compatible con cualquier versión de Streamlit) ──
+    # Nota: no usamos st.chat_input porque requiere top-level en versiones <1.32.
+    with st.form(key="_ia_form", clear_on_submit=True):
+        col_inp, col_btn = st.columns([5, 1])
+        with col_inp:
+            user_query = st.text_input(
+                "Consulta",
+                placeholder="¿Qué quieres investigar? (persona, empresa, organismo, anomalías...)",
+                label_visibility="collapsed",
+                key="_ia_text_input",
+            )
+        with col_btn:
+            submitted = st.form_submit_button("Investigar", type="primary", use_container_width=True)
+
+    # ── Procesar prompt explícito (desde arg o desde el form) ──
+    effective_prompt = prompt or (user_query if submitted and user_query.strip() else None)
+    if effective_prompt:
+        _process_ia_query(effective_prompt)
 
     # ── Renderizar chat (ahora incluye mensajes nuevos si se procesó un prompt) ──
     chat_html = _render_chat_bubbles(st.session_state.ia_messages)
@@ -2658,8 +2694,7 @@ def main():
     with tab_analistas:
         _render_tab_denuncias(df_filtrado)
     with tab_ia:
-        ia_prompt = st.chat_input("¿Qué quieres investigar? (persona, empresa, organismo, anomalías...)")
-        _render_tab_ia(df_filtrado, prompt=ia_prompt)
+        _render_tab_ia(df_filtrado)
 
     # Footer (share + disclaimer)
     _render_footer_share(total_oc, total_gasto)

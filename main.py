@@ -357,12 +357,17 @@ if __name__ == "__main__":
     else:
         target_date = date.today() - timedelta(days=1)
 
+    # Auto-enable Telegram si hay credenciales (sin requerir --telegram)
+    notificar = args.telegram or bool(TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID)
+    if notificar and not args.telegram:
+        logger.info("Telegram auto-habilitado: credenciales detectadas en config/env.")
+
     try:
         run_pipeline(
             fecha=target_date,
             solo_analisis=args.solo_analisis,
             metodo=args.metodo,
-            notificar_telegram=args.telegram,
+            notificar_telegram=notificar,
             max_oc=args.max_oc,
         )
     except KeyboardInterrupt:

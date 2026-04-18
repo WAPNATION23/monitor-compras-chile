@@ -311,6 +311,140 @@ class TestDetector:
         spider_result = det._detect_spider(df)
         assert not spider_result.empty
 
+    def test_monopolio_detecta_concentracion(self):
+        """Monopolio: proveedor concentra >=80% de OCs de un organismo."""
+        from detector import AnomalyDetector
+
+        df = pd.DataFrame({
+            "codigo_oc": [f"OC{i}" for i in range(12)],
+            "nombre_comprador": ["MINSAL"] * 12,
+            "nombre_proveedor": ["ACME SA"] * 10 + ["OTRA SRL"] * 2,
+            "rut_proveedor": ["111"] * 10 + ["222"] * 2,
+            "monto_total_item": [10_000_000] * 12,
+            "fecha_creacion": pd.date_range("2024-01-01", periods=12, freq="D"),
+            "nombre_producto": ["Servicio"] * 12,
+            "precio_unitario": [10_000_000] * 12,
+        })
+        result = AnomalyDetector._detect_monopolio(df)
+        assert not result.empty
+        assert (result["metodo"] == "Monopolio por Comprador").all()
+        # ACME concentra 10/12 = 83%
+        assert "ACME SA" in result["motivo_alerta"].iloc[0]
+
+    def test_monopolio_vacio_sin_concentracion(self):
+        """Si nadie pasa del umbral, no reporta."""
+        from detector import AnomalyDetector
+        df = pd.DataFrame({
+            "codigo_oc": [f"OC{i}" for i in range(10)],
+            "nombre_comprador": ["MINSAL"] * 10,
+            "nombre_proveedor": [f"PROV{i%5}" for i in range(10)],  # 5 provs, 20% c/u
+            "rut_proveedor": [f"{i}" for i in range(10)],
+            "monto_total_item": [10_000_000] * 10,
+            "fecha_creacion": pd.date_range("2024-01-01", periods=10, freq="D"),
+            "nombre_producto": ["X"] * 10,
+            "precio_unitario": [10_000_000] * 10,
+        })
+        result = AnomalyDetector._detect_monopolio(df)
+        assert result.empty
+
+    def test_proveedor_nuevo_detecta_shell(self):
+        """Proveedor con primera OC reciente y monto alto = alerta."""
+        from detector import AnomalyDetector
+        df = pd.DataFrame({
+            "codigo_oc": ["OC1", "OC2"],
+            "rut_proveedor": ["999-9"] * 2,
+            "nombre_proveedor": ["SHELL SPA"] * 2,
+            "nombre_comprador": ["MUNI"] * 2,
+            "monto_total_item": [15_000_000, 10_000_000],
+            "fecha_creacion": pd.to_datetime(["2024-10-01", "2024-10-10"]),
+            "nombre_producto": ["X"] * 2,
+            "precio_unitario": [1] * 2,
+        })
+        result = AnomalyDetector._detect_proveedor_nuevo(df)
+        assert not result.empty
+        assert (result["metodo"] == "Proveedor Recién Nacido").all()
+
+    def test_proveedor_nuevo_ignora_antiguos(self):
+        """Si proveedor tiene historial >30d, no alerta."""
+        from detector import AnomalyDetector
+        df = pd.DataFrame({
+            "codigo_oc": ["OC1", "OC2"],
+            "rut_proveedor": ["123-4"] * 2,
+            "nombre_proveedor": ["VETERANA SA"] * 2,
+            "nombre_comprador": ["MUNI"] * 2,
+            "monto_total_item": [50_000_000, 50_000_000],
+            "fecha_creacion": pd.to_datetime(["2020-01-01", "2024-10-01"]),
+            "nombre_producto": ["X"] * 2,
+            "precio_unitario": [1] * 2,
+        })
+        result = AnomalyDetector._detect_proveedor_nuevo(df)
+        assert result.empty
+
+
+# ══════════════════════════════════════════════
+# Tests: CrossReferencer.red_de_poder
+# ══════════════════════════════════════════════
+
+class TestRedDePoder:
+    def test_red_de_poder_requires_cross_tables(self, test_db):
+        """Sin tablas de cruce, red_de_poder retorna vacío."""
+        from cross_referencer import CrossReferencer
+        xref = CrossReferencer(db_path=test_db)
+        result = xref.red_de_poder()
+        # Fuentes=1 (solo OCs) < 2 → filtered out
+        assert result.empty
+
+    def test_red_de_poder_detecta_rut_multifuente(self, tmp_path):
+        """RUT en OCs + cruce_gastos + cruce_aportes debe aparecer con fuentes=3."""
+        from cross_referencer import CrossReferencer
+        db = tmp_path / "rp.db"
+        conn = sqlite3.connect(db)
+        conn.execute(CREATE_TABLE_SQL)
+        conn.executemany(
+            "INSERT INTO ordenes_items (codigo_oc, nombre_producto, categoria, cantidad, "
+            "precio_unitario, monto_total_item, rut_comprador, nombre_comprador, "
+            "rut_proveedor, nombre_proveedor, fecha_creacion, estado, tipo_oc, categoria_riesgo) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            [
+                (f"OC{i}", "Prod", "Cat", 1, 1_000_000, 1_000_000,
+                 "60.000.000-1", "MINSAL", "76.111.111-1", "POLLUX SA",
+                 "2024-01-01", "6", "C1", "GENERAL")
+                for i in range(3)
+            ],
+        )
+        # Tablas de cruce
+        conn.execute("""
+            CREATE TABLE cruce_gastos_proveedores (
+                rut TEXT, nombre_proveedor TEXT,
+                n_facturas_campana INT, total_facturado_campana REAL,
+                candidatos_beneficiados TEXT, partidos TEXT,
+                n_ocs_estado INT, total_ocs_estado REAL
+            )
+        """)
+        conn.execute(
+            "INSERT INTO cruce_gastos_proveedores VALUES (?,?,?,?,?,?,?,?)",
+            ("76.111.111-1", "POLLUX SA", 5, 20_000_000, "X", "Y", 3, 3_000_000),
+        )
+        conn.execute("""
+            CREATE TABLE cruce_aportes_proveedores (
+                nombre_aportante TEXT, n_aportes INT, total_donado REAL,
+                receptores TEXT, n_ocs INT, total_ocs REAL,
+                rut_proveedor TEXT, nombre_proveedor_match TEXT
+            )
+        """)
+        conn.execute(
+            "INSERT INTO cruce_aportes_proveedores VALUES (?,?,?,?,?,?,?,?)",
+            ("POLLUX SA", 2, 5_000_000, "Candidato X", 3, 3_000_000, "76.111.111-1", "POLLUX SA"),
+        )
+        conn.commit()
+        conn.close()
+
+        xref = CrossReferencer(db_path=db)
+        result = xref.red_de_poder()
+        assert not result.empty
+        assert result.iloc[0]["fuentes"] == 3
+        assert "POLLUX" in str(result.iloc[0]["nombre_proveedor"]).upper()
+
 
 # ══════════════════════════════════════════════
 # Tests: CrossReferencer

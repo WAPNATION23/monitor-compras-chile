@@ -464,6 +464,113 @@ class CrossReferencer:
                 return pd.DataFrame()
 
     # ══════════════════════════════════════════════════════════════════════════ #
+    # CRUCE 7.5: RED DE PODER (OCs ⊕ Aportes SERVEL ⊕ Gastos SERVEL por RUT)
+    # ══════════════════════════════════════════════════════════════════════════ #
+
+    def red_de_poder(self, top_n: int = 50) -> pd.DataFrame:
+        """
+        Consolida todas las señales por RUT de proveedor:
+          - Monto y #OCs con el Estado (ordenes_items)
+          - Aportes a campañas (cruce_aportes_proveedores, match por nombre)
+          - Gastos de campañas (cruce_gastos_proveedores, match exacto por RUT)
+
+        Un RUT que aparece simultáneamente en las 3 fuentes es la firma
+        fractal del capitalismo de amigos.
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            def _has(tname: str) -> bool:
+                row = conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
+                    (tname,),
+                ).fetchone()
+                return row is not None
+
+            # Base: OCs por proveedor
+            base = pd.read_sql_query(
+                """
+                SELECT
+                    REPLACE(rut_proveedor, '-', '') AS rut_norm,
+                    MAX(nombre_proveedor)           AS nombre_proveedor,
+                    COUNT(DISTINCT codigo_oc)        AS n_ocs_estado,
+                    ROUND(SUM(monto_total_item))    AS total_ocs_estado,
+                    COUNT(DISTINCT nombre_comprador) AS n_organismos
+                FROM ordenes_items
+                WHERE rut_proveedor IS NOT NULL AND rut_proveedor != ''
+                  AND estado != '9' AND precio_unitario > 0
+                GROUP BY rut_norm
+                """,
+                conn,
+            )
+            if base.empty:
+                return pd.DataFrame()
+
+            # Gastos SERVEL (RUT exacto)
+            if _has("cruce_gastos_proveedores"):
+                gastos = pd.read_sql_query(
+                    """
+                    SELECT REPLACE(rut, '-', '') AS rut_norm,
+                           n_facturas_campana,
+                           total_facturado_campana,
+                           candidatos_beneficiados,
+                           partidos
+                    FROM cruce_gastos_proveedores
+                    """,
+                    conn,
+                )
+                base = base.merge(gastos, on="rut_norm", how="left")
+            else:
+                base["n_facturas_campana"] = 0
+                base["total_facturado_campana"] = 0
+                base["candidatos_beneficiados"] = ""
+                base["partidos"] = ""
+
+            # Aportes SERVEL (match por nombre, no por RUT)
+            if _has("cruce_aportes_proveedores"):
+                aportes = pd.read_sql_query(
+                    """
+                    SELECT nombre_aportante,
+                           nombre_proveedor_match,
+                           n_aportes,
+                           total_donado AS total_aportado,
+                           receptores
+                    FROM cruce_aportes_proveedores
+                    """,
+                    conn,
+                )
+                # match por nombre (uppercased, stripped)
+                base["_key"] = base["nombre_proveedor"].fillna("").str.upper().str.strip()
+                aportes["_key"] = aportes["nombre_proveedor_match"].fillna("").str.upper().str.strip()
+                base = base.merge(
+                    aportes[["_key", "n_aportes", "total_aportado", "receptores"]],
+                    on="_key",
+                    how="left",
+                ).drop(columns=["_key"])
+            else:
+                base["n_aportes"] = 0
+                base["total_aportado"] = 0
+                base["receptores"] = ""
+
+            for col in ("n_facturas_campana", "total_facturado_campana",
+                        "n_aportes", "total_aportado"):
+                base[col] = pd.to_numeric(base[col], errors="coerce").fillna(0)
+
+            # Señales cruzadas: cuántas de las 3 fuentes tocan este RUT
+            base["fuentes"] = (
+                (base["n_ocs_estado"] > 0).astype(int)
+                + (base["n_facturas_campana"] > 0).astype(int)
+                + (base["n_aportes"] > 0).astype(int)
+            )
+            # Score simple: bonus por aparecer en multiples fuentes
+            base["score_poder"] = (
+                base["total_ocs_estado"].fillna(0)
+                + 5 * base["total_facturado_campana"]
+                + 10 * base["total_aportado"]
+            ) * base["fuentes"]
+
+            base = base[base["fuentes"] >= 2].sort_values("score_poder", ascending=False)
+            return base.head(top_n).reset_index(drop=True)
+
+    # ══════════════════════════════════════════════════════════════════════════ #
     # CRUCE 8: ANOMALÍAS → PERSONAS (Proveedor ↔ Donante ↔ Lobby)
     # ══════════════════════════════════════════════════════════════════════════ #
 

@@ -1120,6 +1120,55 @@ def _render_tab_cruces(df_filtrado, total_proveedores, total_compradores, n_trat
         else:
             st.info("Sin coincidencias entre aportes SERVEL y adjudicaciones bajo el filtro actual.")
 
+        # ── Red de Poder (OCs ⊕ Aportes ⊕ Gastos) ──
+        st.markdown("---")
+        st.markdown(
+            '<div class="section-header">'
+            '<div class="icon purple">🕸️</div>'
+            '<div><h3>Red de Poder — RUTs en múltiples fuentes</h3>'
+            '<p>Proveedores que aparecen simultáneamente como: contratistas del Estado, '
+            'aportantes de campaña y/o proveedores que facturaron a campañas.</p></div>'
+            '</div>',
+            unsafe_allow_html=True,
+        )
+        try:
+            df_red = xref.red_de_poder(top_n=50)
+            if filtro_global and not df_red.empty:
+                q = filtro_global.lower()
+                df_red = df_red[
+                    df_red['nombre_proveedor'].fillna('').str.lower().str.contains(q, na=False)
+                    | df_red['rut_norm'].fillna('').str.lower().str.contains(q, na=False)
+                ]
+            if df_red.empty:
+                st.info("Sin proveedores detectados en múltiples fuentes aún. Carga aportes+gastos SERVEL.")
+            else:
+                st.success(
+                    f"🚨 **{len(df_red)}** proveedores aparecen en 2+ fuentes "
+                    "(OCs + Aportes y/o Gastos de campaña)."
+                )
+                show = df_red.rename(columns={
+                    "rut_norm": "RUT",
+                    "nombre_proveedor": "Proveedor",
+                    "n_ocs_estado": "OCs Estado",
+                    "total_ocs_estado": "Monto OCs",
+                    "n_organismos": "N° Organismos",
+                    "n_facturas_campana": "Facturas a campaña",
+                    "total_facturado_campana": "Facturado campaña",
+                    "n_aportes": "Aportes SERVEL",
+                    "total_aportado": "Monto aportado",
+                    "fuentes": "Fuentes",
+                    "candidatos_beneficiados": "Candidatos",
+                    "partidos": "Partidos",
+                })
+                show = show.drop(columns=[c for c in ["score_poder", "receptores"] if c in show.columns])
+                for col in ("Monto OCs", "Facturado campaña", "Monto aportado"):
+                    if col in show.columns:
+                        show[col] = show[col].fillna(0).apply(format_clp_full)
+                st.dataframe(show, hide_index=True, use_container_width=True)
+        except Exception as exc:
+            logger.warning("red_de_poder falló: %s", exc)
+            st.caption(f"Red de Poder no disponible: {exc}")
+
         st.markdown("---")
         st.markdown("#### Malla Societaria — Beneficiarios Finales")
         st.caption("Personas naturales detrás de empresas que ganan contratos públicos.")

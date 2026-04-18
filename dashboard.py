@@ -40,6 +40,42 @@ logger = logging.getLogger(__name__)
 
 _LOGO_PATH = "logo_ojo_pueblo.png"
 
+
+# ─────────────────────────────────────────────────────────────────────────
+# BOOTSTRAP DE SECRETS — CRÍTICO PARA STREAMLIT CLOUD
+# ─────────────────────────────────────────────────────────────────────────
+# Streamlit Cloud expone secrets vía st.secrets pero NO los inyecta como
+# variables de entorno. Todo el código del proyecto usa os.getenv(), así
+# que copiamos st.secrets → os.environ al arrancar la app. Sin esto, la
+# IA "no aparece" en producción (DEEPSEEK_API_KEY queda vacío aunque el
+# usuario lo haya configurado en el panel de Secrets).
+def _bootstrap_secrets_to_env() -> None:
+    """Copia st.secrets a os.environ para compatibilidad con código legacy.
+
+    Streamlit Cloud expone secrets vía st.secrets pero NO los inyecta como
+    variables de entorno. El resto del proyecto usa os.getenv() para leer
+    DEEPSEEK_API_KEY, MERCADO_PUBLICO_TICKET, TELEGRAM_BOT_TOKEN, etc.
+    """
+    if not hasattr(st, "secrets"):
+        return
+    try:
+        # st.secrets es StreamlitSecrets, dict-like. keys() lanza si no hay
+        # archivo secrets.toml cargado (local sin config).
+        secrets_keys = list(st.secrets.keys())
+    except Exception:  # noqa: BLE001
+        return
+    for key in secrets_keys:
+        try:
+            value = st.secrets[key]
+        except Exception:  # noqa: BLE001
+            continue
+        # Solo strings simples (no secciones anidadas) y solo si no existe ya.
+        if isinstance(value, str) and value and not os.environ.get(key):
+            os.environ[key] = value
+
+
+_bootstrap_secrets_to_env()
+
 # ─────────────────────────────────────────────────────────────────────────
 # CONFIGURACIÓN DE PÁGINA Y ESTILOS
 # ─────────────────────────────────────────────────────────────────────────
@@ -1927,6 +1963,20 @@ def _render_tab_ia(df_filtrado, prompt=None):
         '</div>',
         unsafe_allow_html=True,
     )
+
+    # Check de configuración VISIBLE — si no hay API key, el usuario ve un
+    # mensaje claro en vez de un chat que "no responde".
+    if not os.getenv("DEEPSEEK_API_KEY", "").strip():
+        st.error(
+            "🔑 **Asistente IA no configurado.**\n\n"
+            "Falta la variable `DEEPSEEK_API_KEY`. En Streamlit Cloud:\n"
+            "1. Ve a tu app → menú `⋮` → **Settings** → **Secrets**\n"
+            "2. Agrega: `DEEPSEEK_API_KEY = \"sk-...\"`\n"
+            "3. Guarda y reboot la app.\n\n"
+            "Mientras tanto, las demás pestañas (Cruces Forenses, Aportes SERVEL, "
+            "En la Mira, Datos Crudos) funcionan sin IA."
+        )
+        return
 
     if "ia_messages" not in st.session_state:
         st.session_state.ia_messages = [

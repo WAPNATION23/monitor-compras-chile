@@ -55,23 +55,79 @@ def _bootstrap_secrets_to_env() -> None:
     Streamlit Cloud expone secrets vía st.secrets pero NO los inyecta como
     variables de entorno. El resto del proyecto usa os.getenv() para leer
     DEEPSEEK_API_KEY, MERCADO_PUBLICO_TICKET, TELEGRAM_BOT_TOKEN, etc.
+
+    Aplana también secciones anidadas ([section] clave = valor) porque los
+    usuarios a veces organizan el archivo secrets.toml con headers. Fuerza
+    override si el env var está vacío.
     """
     if not hasattr(st, "secrets"):
         return
     try:
-        # st.secrets es StreamlitSecrets, dict-like. keys() lanza si no hay
-        # archivo secrets.toml cargado (local sin config).
         secrets_keys = list(st.secrets.keys())
     except Exception:  # noqa: BLE001
         return
+
+    def _set(key: str, value) -> None:
+        if not isinstance(value, str):
+            try:
+                value = str(value)
+            except Exception:  # noqa: BLE001
+                return
+        value = value.strip()
+        if value and not os.environ.get(key, "").strip():
+            os.environ[key] = value
+
     for key in secrets_keys:
         try:
             value = st.secrets[key]
         except Exception:  # noqa: BLE001
             continue
-        # Solo strings simples (no secciones anidadas) y solo si no existe ya.
-        if isinstance(value, str) and value and not os.environ.get(key):
-            os.environ[key] = value
+        # Sección anidada (dict-like): aplanar sus claves
+        if hasattr(value, "keys") and not isinstance(value, str):
+            try:
+                for sub_key in value.keys():
+                    try:
+                        _set(sub_key, value[sub_key])
+                    except Exception:  # noqa: BLE001
+                        continue
+            except Exception:  # noqa: BLE001
+                continue
+            continue
+        _set(key, value)
+
+
+def _get_secret(key: str, default: str = "") -> str:
+    """Lee un secret con fallback robusto: env → st.secrets (plano o anidado)."""
+    val = os.environ.get(key, "").strip()
+    if val:
+        return val
+    if not hasattr(st, "secrets"):
+        return default
+    try:
+        if key in st.secrets:
+            raw = st.secrets[key]
+            if isinstance(raw, str) and raw.strip():
+                return raw.strip()
+    except Exception:  # noqa: BLE001
+        pass
+    # Buscar en secciones anidadas
+    try:
+        for top_key in st.secrets.keys():
+            try:
+                section = st.secrets[top_key]
+            except Exception:  # noqa: BLE001
+                continue
+            if hasattr(section, "keys") and not isinstance(section, str):
+                try:
+                    if key in section:
+                        raw = section[key]
+                        if isinstance(raw, str) and raw.strip():
+                            return raw.strip()
+                except Exception:  # noqa: BLE001
+                    continue
+    except Exception:  # noqa: BLE001
+        pass
+    return default
 
 
 _bootstrap_secrets_to_env()
@@ -1785,7 +1841,6 @@ def _render_tab_denuncias(df_filtrado):
                 [
                  "Sobreprecio / Sobrecosto sistemático",
                  "Proyecto de ley sin transparencia / Lobby directo",
-                 "Tráfico de influencias / Conflicto de interés",
                  "Fraccionamiento (licitación evadida)",
                  "Contratación en horario no hábil (alto monto)",
                  "Empresa de fachada / giro dudoso",
@@ -1969,13 +2024,22 @@ def _render_tab_ia(df_filtrado, prompt=None):
 
     # Check de configuración VISIBLE — si no hay API key, el usuario ve un
     # mensaje claro en vez de un chat que "no responde".
-    if not os.getenv("DEEPSEEK_API_KEY", "").strip():
+    _api_key = _get_secret("DEEPSEEK_API_KEY")
+    if _api_key and not os.environ.get("DEEPSEEK_API_KEY"):
+        os.environ["DEEPSEEK_API_KEY"] = _api_key
+    if not _api_key:
+        # Diagnóstico: mostrar qué claves están disponibles en st.secrets
+        try:
+            _avail = list(st.secrets.keys()) if hasattr(st, "secrets") else []
+        except Exception:  # noqa: BLE001
+            _avail = []
         st.error(
             "🔑 **Asistente IA no configurado.**\n\n"
             "Falta la variable `DEEPSEEK_API_KEY`. En Streamlit Cloud:\n"
             "1. Ve a tu app → menú `⋮` → **Settings** → **Secrets**\n"
-            "2. Agrega: `DEEPSEEK_API_KEY = \"sk-...\"`\n"
+            "2. Agrega **sin sección** (no uses `[headers]`): `DEEPSEEK_API_KEY = \"sk-...\"`\n"
             "3. Guarda y reboot la app.\n\n"
+            f"**Diagnóstico:** claves detectadas en `st.secrets`: `{_avail or 'ninguna'}`.\n\n"
             "Mientras tanto, las demás pestañas (Cruces Forenses, Aportes SERVEL, "
             "En la Mira, Datos Crudos) funcionan sin IA."
         )
@@ -2218,7 +2282,7 @@ def _render_tab_servel(df_filtrado: pd.DataFrame):
             st.dataframe(por_eleccion, use_container_width=True, hide_index=True)
 
             # ═══════════════════════════════════════════════════════════
-            # GASTOS SERVEL — Proveedores que facturaron a campanas
+            # GASTOS SERVEL — Proveedores que facturaron a campañas
             # ═══════════════════════════════════════════════════════════
             total_gastos = conn.execute(
                 "SELECT name FROM sqlite_master WHERE type='table' AND name='gastos_servel'"
@@ -2343,14 +2407,7 @@ def main():
             unsafe_allow_html=True,
         )
 
-    # Aviso solo si la IA no está configurada (los botones Investigar la usan)
-    if not os.getenv("DEEPSEEK_API_KEY", ""):
-        st.warning(
-            "Asistente IA desactivado: configura `DEEPSEEK_API_KEY` en Streamlit Cloud "
-            "(Settings → Secrets) para habilitar los botones **Investigar** y la pestaña IA. "
-            "El resto del dashboard funciona normalmente.",
-            icon="⚠",
-        )
+    # Aviso solo si la IA está configurada
 
     # VERIFICACIÓN DE BD — restaurar seed comprimido si falta o está vacía
     def _needs_seed_restore() -> bool:

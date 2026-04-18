@@ -12,14 +12,12 @@ from __future__ import annotations
 import io
 import logging
 import sqlite3
-import urllib3
 
 import pandas as pd
 import requests
 
 from config import DB_NAME
 
-urllib3.disable_warnings()
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
 logger = logging.getLogger(__name__)
 
@@ -73,7 +71,7 @@ def _find_header_row(xl: pd.ExcelFile, sheet: str) -> int | None:
 def load_source(label: str, url: str) -> pd.DataFrame:
     logger.info("Descargando %s", label)
     try:
-        r = requests.get(url, timeout=120, verify=False,
+        r = requests.get(url, timeout=120,
                          headers={"User-Agent": "Mozilla/5.0 AuditoriaChile"})
         r.raise_for_status()
     except Exception as exc:

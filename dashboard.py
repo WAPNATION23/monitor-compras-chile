@@ -1872,16 +1872,13 @@ def _process_ia_query(effective_prompt: str, *, is_from_button: bool = False):
                     st.warning(f"No se encontraron registros para RUT {rut_detectado}.")
 
     if is_from_button:
-        # Guardar respuesta y activar panel persistente para el próximo render —
-        # se muestra arriba de las pestañas y SOLO se cierra con el botón.
+        # Señal de "respuesta lista" — se muestra un toast/banner de éxito en el
+        # próximo render (sin panel modal ni JS auto-click que secuestre la
+        # navegación entre pestañas). El usuario entra a "Asistente IA" cuando
+        # quiera y ve la respuesta completa en el historial del chat.
         _ia_msgs = st.session_state.get("ia_messages", [])
         if _ia_msgs and _ia_msgs[-1]["role"] == "assistant":
-            st.session_state["_ia_modal_content"] = _ia_msgs[-1]["content"]
-            st.session_state["_ia_modal_open"] = True
-            # Dispara el auto-switch a la pestaña IA SOLO en el próximo render.
-            # El flag se consume con .pop() para que no vuelva a saltar en
-            # reruns posteriores (si no, secuestra la navegación).
-            st.session_state["_ia_autoswitch_pending"] = True
+            st.session_state["_ia_response_ready"] = True
         st.rerun()
 
 
@@ -2449,103 +2446,15 @@ def main():
     # cuando el usuario está en otra pestaña).
     _pending = st.session_state.pop("_pending_query", None)
     if _pending:
-        # Banner visible y prominente mientras el cerebro forense trabaja — evita
-        # que el usuario sienta que "no pasa nada" (la consulta toma 10-30s).
-        st.markdown(
-            """
-            <div style="background: linear-gradient(135deg, #1e3a8a 0%, #2563eb 100%);
-                        color:#fff; padding:14px 18px; border-radius:10px;
-                        margin:8px 0 16px 0; box-shadow:0 4px 16px rgba(37,99,235,0.35);
-                        border-left:4px solid #60a5fa;">
-              <div style="font-weight:700; font-size:15px; letter-spacing:0.3px;">
-                🧠 Cerebro Forense procesando…
-              </div>
-              <div style="font-size:13px; opacity:0.92; margin-top:4px;">
-                Consultando 7 fuentes (Mercado Público, SERVEL, InfoLobby, CGR, InfoProbidad, DIPRES, web).
-                La respuesta aparecerá en la pestaña <b>Asistente IA</b> al finalizar.
-              </div>
-            </div>
-            <script>
-            window.parent.scrollTo({top: 0, behavior: 'auto'});
-            window.scrollTo({top: 0, behavior: 'auto'});
-            </script>
-            """,
-            unsafe_allow_html=True,
-        )
-        _process_ia_query(_pending, is_from_button=True)
+        with st.spinner("🧠 Cerebro Forense procesando — consultando 7 fuentes (Mercado Público, SERVEL, InfoLobby, CGR, InfoProbidad, DIPRES, web)…"):
+            _process_ia_query(_pending, is_from_button=True)
 
-    # Panel persistente con la respuesta del Cerebro Forense — se renderiza
-    # arriba de las pestañas y SOLO se cierra con el botón explícito (no se
-    # descarta al hacer click fuera ni al scrollear, a diferencia de st.dialog).
-    if st.session_state.get("_ia_modal_open"):
-        # Auto-switch a la pestaña Asistente IA SOLO la primera vez que aparece el
-        # panel. Si lo dejamos activo en cada rerun, el JS hace click en la tab IA
-        # cada vez que el usuario intenta navegar a otra pestaña (Cruces, Mira,
-        # Fuentes...) y las pestañas "no cargan" porque vuelven a IA.
-        _do_autoswitch = st.session_state.pop("_ia_autoswitch_pending", False)
-        st.markdown(
-            """
-            <style>
-            .forensic-answer-panel {
-                background: linear-gradient(135deg, #0b1e3f 0%, #102a52 100%);
-                border: 2px solid #4a90e2;
-                border-radius: 12px;
-                padding: 1.5rem 1.75rem;
-                margin: 0.5rem 0 1.5rem 0;
-                box-shadow: 0 8px 32px rgba(0,0,0,0.4);
-            }
-            .forensic-answer-panel h4 {
-                color: #4a90e2;
-                margin: 0 0 0.75rem 0;
-                font-size: 1.15rem;
-                letter-spacing: 0.5px;
-            }
-            .forensic-answer-panel .answer-body {
-                color: #e8eef7;
-                line-height: 1.55;
-            }
-            </style>
-            <div id="forensic-answer-anchor"></div>
-            """,
-            unsafe_allow_html=True,
-        )
-        if _do_autoswitch:
-            st.markdown(
-                """
-                <script>
-                // Auto-scroll al panel y auto-click a la pestaña "Asistente IA"
-                // SOLO una vez (justo cuando acaba de llegar la respuesta),
-                // para no secuestrar la navegación del usuario a otras pestañas.
-                setTimeout(function() {
-                    var doc = window.parent.document || document;
-                    var el = doc.getElementById('forensic-answer-anchor');
-                    if (el) el.scrollIntoView({behavior: 'smooth', block: 'start'});
-                    window.parent.scrollTo({top: 0, behavior: 'smooth'});
-                    try {
-                        var tabs = doc.querySelectorAll('button[data-baseweb="tab"]');
-                        for (var i = 0; i < tabs.length; i++) {
-                            if (tabs[i].innerText && tabs[i].innerText.indexOf('Asistente') !== -1) {
-                                tabs[i].click();
-                                break;
-                            }
-                        }
-                    } catch (e) { /* no-op */ }
-                }, 150);
-                </script>
-                """,
-                unsafe_allow_html=True,
-            )
-        with st.container(border=False):
-            st.markdown('<div class="forensic-answer-panel">', unsafe_allow_html=True)
-            st.markdown("#### Respuesta del Cerebro Forense")
-            st.markdown(st.session_state.get("_ia_modal_content", ""))
-            st.caption("Historial completo en la pestaña **Asistente IA**.")
-            col_a, col_b = st.columns([1, 5])
-            with col_a:
-                if st.button("Cerrar", type="primary", key="_close_ia_panel"):
-                    st.session_state["_ia_modal_open"] = False
-                    st.rerun()
-            st.markdown('</div>', unsafe_allow_html=True)
+    # Aviso compacto cuando acaba de llegar una respuesta (sin panel modal ni JS
+    # que secuestre navegación). El usuario ve el toast y luego entra a la tab
+    # Asistente IA cuando quiera.
+    if st.session_state.pop("_ia_response_ready", False):
+        st.toast("Respuesta lista en la pestaña Asistente IA", icon="🧠")
+        st.success("✅ Cerebro Forense terminó. Abre la pestaña **Asistente IA** para ver el análisis completo.")
 
     tab_estadisticas, tab_cruce, tab_servel, tab_registro, tab_medios, tab_mira, tab_analistas, tab_ia = st.tabs(tab_names)
 

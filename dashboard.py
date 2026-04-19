@@ -2663,21 +2663,25 @@ def main():
             st.code(_tb.format_exc(), language="python")
 
     with tab_estadisticas:
-        st.write("BUILD TEST-V4 — Panel General")
+        st.write("Panel General desactivado temporalmente — build V5")
     with tab_cruce:
-        st.write("BUILD TEST-V4 — Cruces Forenses")
+        _safe_tab(
+            "Cruces Forenses", _render_tab_cruces,
+            df_filtrado, total_proveedores, total_compradores,
+            n_trato_directo, filtro_global,
+        )
     with tab_servel:
-        st.write("BUILD TEST-V4 — Aportes SERVEL")
+        _safe_tab("Aportes SERVEL", _render_tab_servel, df_filtrado)
     with tab_registro:
-        st.write("BUILD TEST-V4 — Datos Crudos")
+        _safe_tab("Datos Crudos", _render_tab_datos, df_filtrado, filtro_global)
     with tab_medios:
-        st.write("BUILD TEST-V4 — Fuentes")
+        _safe_tab("Fuentes", _render_tab_fuentes, df_filtrado)
     with tab_mira:
-        st.write("BUILD TEST-V4 — En la Mira")
+        _safe_tab("En la Mira", _render_tab_mira, df_filtrado)
     with tab_analistas:
-        st.write("BUILD TEST-V4 — Denuncias")
+        _safe_tab("Denuncias", _render_tab_denuncias, df_filtrado)
     with tab_ia:
-        st.write("BUILD TEST-V4 — Asistente IA")
+        _safe_tab("Asistente IA", _render_tab_ia, df_filtrado)
 
     # Footer (share + disclaimer)
     _render_footer_share(total_oc, total_gasto)

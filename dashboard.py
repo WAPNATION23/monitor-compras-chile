@@ -2663,37 +2663,21 @@ def main():
             st.code(_tb.format_exc(), language="python")
 
     with tab_estadisticas:
-        st.info(f"🟢 Panel General — build 407v3 — {len(df_filtrado)} filas")
-        _safe_tab(
-            "Panel General", _render_tab_general,
-            df_filtrado, total_gasto, total_oc, total_proveedores,
-            total_compradores, pct_td, n_trato_directo,
-        )
+        st.write("BUILD TEST-V4 — Panel General")
     with tab_cruce:
-        st.info(f"🟢 Cruces Forenses — build 407v3 — {len(df_filtrado)} filas")
-        _safe_tab(
-            "Cruces Forenses", _render_tab_cruces,
-            df_filtrado, total_proveedores, total_compradores,
-            n_trato_directo, filtro_global,
-        )
+        st.write("BUILD TEST-V4 — Cruces Forenses")
     with tab_servel:
-        st.info(f"🟢 Aportes SERVEL — build 407v3 — {len(df_filtrado)} filas")
-        _safe_tab("Aportes SERVEL", _render_tab_servel, df_filtrado)
+        st.write("BUILD TEST-V4 — Aportes SERVEL")
     with tab_registro:
-        st.info(f"🟢 Datos Crudos — build 407v3 — {len(df_filtrado)} filas")
-        _safe_tab("Datos Crudos", _render_tab_datos, df_filtrado, filtro_global)
+        st.write("BUILD TEST-V4 — Datos Crudos")
     with tab_medios:
-        st.info(f"🟢 Fuentes — build 407v3 — {len(df_filtrado)} filas")
-        _safe_tab("Fuentes", _render_tab_fuentes, df_filtrado)
+        st.write("BUILD TEST-V4 — Fuentes")
     with tab_mira:
-        st.info(f"🟢 En la Mira — build 407v3 — {len(df_filtrado)} filas")
-        _safe_tab("En la Mira", _render_tab_mira, df_filtrado)
+        st.write("BUILD TEST-V4 — En la Mira")
     with tab_analistas:
-        st.info(f"🟢 Denuncias — build 407v3 — {len(df_filtrado)} filas")
-        _safe_tab("Denuncias", _render_tab_denuncias, df_filtrado)
+        st.write("BUILD TEST-V4 — Denuncias")
     with tab_ia:
-        st.info(f"🟢 Asistente IA — build 407v3 — {len(df_filtrado)} filas")
-        _safe_tab("Asistente IA", _render_tab_ia, df_filtrado)
+        st.write("BUILD TEST-V4 — Asistente IA")
 
     # Footer (share + disclaimer)
     _render_footer_share(total_oc, total_gasto)

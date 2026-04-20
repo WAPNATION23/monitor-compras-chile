@@ -2665,14 +2665,18 @@ def main():
             st.error(f"❌ No se pudo cargar '{label}': {type(_exc).__name__}: {_exc}")
             st.code(_tb.format_exc(), language="python")
 
-    with st.sidebar:
-        st.markdown("<div style='margin:12px 0; border-top:1px solid rgba(51,65,85,0.3);'></div>", unsafe_allow_html=True)
-        st.markdown(
-            "<p style='color:#475569; font-size:0.7rem; text-transform:uppercase; "
-            "letter-spacing:0.08em; font-weight:600; margin-bottom:4px;'>Navegación</p>",
-            unsafe_allow_html=True,
-        )
-        active_tab = st.radio("Módulos", tab_names, label_visibility="collapsed")
+    # Barra lateral CSS hack para disimular el radio como pestañas (opcional)
+    st.markdown(
+        """<style>
+        div[role='radiogroup'] { flex-wrap: wrap; gap: 8px; margin-bottom: 20px; }
+        div[role='radiogroup'] > label { padding: 8px 16px; background: rgba(30,41,59,0.5); border-radius: 8px; cursor: pointer; }
+        </style>""",
+        unsafe_allow_html=True
+    )
+    
+    active_tab = st.radio("Módulos", tab_names, horizontal=True, label_visibility="collapsed")
+
+    st.markdown("<div style='margin-bottom:16px;'></div>", unsafe_allow_html=True)
 
     if active_tab == "Panel General":
         _safe_tab(

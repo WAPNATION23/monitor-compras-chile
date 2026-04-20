@@ -507,7 +507,7 @@ def _render_empty_state():
         st.markdown("#### Extraer datos ahora")
         st.caption("Descarga órdenes de compra de ayer directamente desde aquí.")
         max_oc = st.selectbox("Cantidad de OC a extraer", [100, 500, 1000, 5000], index=0)
-        if st.button("Extraer datos de Mercado Público", type="primary", width='stretch'):
+        if st.button("Extraer datos de Mercado Público", type="primary", use_container_width=True):
             _run_extraction(max_oc)
 
     with col2:
@@ -620,7 +620,7 @@ def _investigate_buttons(entities: list[tuple[str, str]], prefix: str, entity_ty
     for i, (name, rut) in enumerate(entities[:5]):
         with cols[i]:
             label = name[:22] + "…" if len(name) > 22 else name
-            if st.button(f"Investigar · {label}", key=f"inv_{prefix}_{i}", width='stretch'):
+            if st.button(f"Investigar · {label}", key=f"inv_{prefix}_{i}", use_container_width=True):
                 # Si la fila clickeada tiene RUT vacío (común por duplicados
                 # en la BD), buscarlo por nombre antes de mandar a la IA.
                 effective_rut = rut if rut else _resolve_missing_rut(name, entity_type)
@@ -941,7 +941,7 @@ def _render_tab_general(df_filtrado, total_gasto, total_oc, total_proveedores, t
                 hovertemplate='%{customdata[0]}<extra></extra>',
             )
             fig_bar.update_xaxes(tickformat='~s', title_text='')
-            st.plotly_chart(fig_bar, width='stretch')
+            st.plotly_chart(fig_bar, use_container_width=True)
         else:
             st.info("Sin datos suficientes.")
 
@@ -976,7 +976,7 @@ def _render_tab_general(df_filtrado, total_gasto, total_oc, total_proveedores, t
                     orientation="v", yanchor="middle", y=0.5,
                 ),
             )
-            st.plotly_chart(fig_pie, width='stretch')
+            st.plotly_chart(fig_pie, use_container_width=True)
         else:
             st.info("Sin datos.")
 
@@ -1018,7 +1018,7 @@ def _render_tab_general(df_filtrado, total_gasto, total_oc, total_proveedores, t
                 hovertemplate='%{y}<br>%{text}<extra></extra>',
             )
             fig_tipo.update_xaxes(tickformat='~s', title_text='')
-            st.plotly_chart(fig_tipo, width='stretch')
+            st.plotly_chart(fig_tipo, use_container_width=True)
         else:
             st.info("Sin datos.")
 
@@ -1041,7 +1041,7 @@ def _render_tab_general(df_filtrado, total_gasto, total_oc, total_proveedores, t
                 )
                 fig_line.update_yaxes(tickformat='~s', title_text='')
                 fig_line.update_xaxes(tickformat='%d/%m/%y', title_text='')
-                st.plotly_chart(fig_line, width='stretch')
+                st.plotly_chart(fig_line, use_container_width=True)
             else:
                 st.info("No hay fechas válidas.")
         else:
@@ -1053,7 +1053,7 @@ def _render_tab_general(df_filtrado, total_gasto, total_oc, total_proveedores, t
         top5 = df_filtrado.nlargest(5, 'monto_total_item')[['codigo_oc', 'nombre_proveedor', 'rut_proveedor', 'nombre_comprador', 'monto_total_item', 'tipo_oc']].copy()
         top5['monto_total_item'] = top5['monto_total_item'].apply(format_clp)
         top5.columns = ['Código OC', 'Proveedor', 'RUT Proveedor', 'Organismo', 'Monto', 'Tipo']
-        st.dataframe(top5, hide_index=True, width='stretch')
+        st.dataframe(top5, hide_index=True, use_container_width=True)
 
     # ══════════════════════════════════════════════════════════════════════════
     # PESTAÑA 2: CRUCE DE DATOS FORENSES (CrossReferencer)
@@ -1120,7 +1120,7 @@ def _render_tab_cruces(df_filtrado, total_proveedores, total_compradores, n_trat
                     mime="text/csv", key="dl_sosp"
                 )
                 df_sosp['monto_total'] = df_sosp['monto_total'].apply(format_clp_full)
-                st.dataframe(df_sosp, hide_index=True, width='stretch')
+                st.dataframe(df_sosp, hide_index=True, use_container_width=True)
                 # Quick-investigate buttons for top suspicious providers
                 inv_entities = list(zip(df_sosp['nombre_proveedor'], df_sosp['rut_proveedor']))
                 _investigate_buttons(inv_entities, "sosp", "proveedor")
@@ -1139,7 +1139,7 @@ def _render_tab_cruces(df_filtrado, total_proveedores, total_compradores, n_trat
             if not df_riesgo.empty:
                 df_riesgo_show = df_riesgo.head(10)
                 df_riesgo_show['monto_total'] = df_riesgo_show['monto_total'].apply(format_clp_full)
-                st.dataframe(df_riesgo_show, hide_index=True, width='stretch')
+                st.dataframe(df_riesgo_show, hide_index=True, use_container_width=True)
                 inv_orgs = list(zip(df_riesgo.head(10)['nombre_comprador'], df_riesgo.head(10)['rut_comprador']))
                 _investigate_buttons(inv_orgs, "riesgo_org", "organismo")
             else:
@@ -1160,7 +1160,7 @@ def _render_tab_cruces(df_filtrado, total_proveedores, total_compradores, n_trat
                 df_td['monto_td'] = df_td['monto_td'].apply(format_clp_full)
                 td_cols = ['nombre_comprador', 'rut_comprador', 'ratio_td', 'n_trato_directo', 'n_total', 'monto_td', 'monto_total']
                 td_cols = [c for c in td_cols if c in df_td.columns]
-                st.dataframe(df_td.head(10)[td_cols], hide_index=True, width='stretch')
+                st.dataframe(df_td.head(10)[td_cols], hide_index=True, use_container_width=True)
             else:
                 st.info("Sin datos bajo este filtro.")
 
@@ -1178,7 +1178,7 @@ def _render_tab_cruces(df_filtrado, total_proveedores, total_compradores, n_trat
                 df_conc['total_adjudicado'] = df_conc['total_adjudicado'].apply(format_clp_full)
                 conc_cols = ['nombre_proveedor', 'rut_proveedor', 'total_adjudicado', 'pct_del_total', 'n_ordenes']
                 conc_cols = [c for c in conc_cols if c in df_conc.columns]
-                st.dataframe(df_conc[conc_cols], hide_index=True, width='stretch')
+                st.dataframe(df_conc[conc_cols], hide_index=True, use_container_width=True)
                 if 'rut_proveedor' in df_conc.columns:
                     inv_conc = list(zip(df_conc['nombre_proveedor'], df_conc['rut_proveedor']))
                     _investigate_buttons(inv_conc, "conc", "proveedor")
@@ -1207,7 +1207,7 @@ def _render_tab_cruces(df_filtrado, total_proveedores, total_compradores, n_trat
         if not df_servel_cruzado.empty:
             df_servel_cruzado['inversion_electoral'] = df_servel_cruzado['inversion_electoral'].apply(format_clp_full)
             df_servel_cruzado['retorno_licitaciones'] = df_servel_cruzado['retorno_licitaciones'].apply(format_clp_full)
-            st.dataframe(df_servel_cruzado, hide_index=True, width='stretch')
+            st.dataframe(df_servel_cruzado, hide_index=True, use_container_width=True)
         else:
             st.info("Sin coincidencias entre aportes SERVEL y adjudicaciones bajo el filtro actual.")
 
@@ -1255,7 +1255,7 @@ def _render_tab_cruces(df_filtrado, total_proveedores, total_compradores, n_trat
                 for col in ("Monto OCs", "Facturado campaña", "Monto aportado"):
                     if col in show.columns:
                         show[col] = show[col].fillna(0).apply(format_clp_full)
-                st.dataframe(show, hide_index=True, width='stretch')
+                st.dataframe(show, hide_index=True, use_container_width=True)
         except Exception as exc:
             logger.warning("red_de_poder falló: %s", exc)
             st.caption(f"Red de Poder no disponible: {exc}")
@@ -1275,7 +1275,7 @@ def _render_tab_cruces(df_filtrado, total_proveedores, total_compradores, n_trat
 
         if not df_malla.empty:
             df_malla['MONTO_EXTRAIDO'] = df_malla['MONTO_EXTRAIDO'].apply(format_clp_full)
-            st.dataframe(df_malla, hide_index=True, width='stretch')
+            st.dataframe(df_malla, hide_index=True, use_container_width=True)
         else:
             st.info("No hay datos de dueños reales vinculados al Mercado Público en la base local aún.")
 
@@ -1302,7 +1302,7 @@ def _render_tab_cruces(df_filtrado, total_proveedores, total_compradores, n_trat
                     df_cruce_personas['monto_anomalo'] = df_cruce_personas['monto_anomalo'].apply(format_clp_full)
                     if 'donacion_total_servel' in df_cruce_personas.columns:
                         df_cruce_personas['donacion_total_servel'] = df_cruce_personas['donacion_total_servel'].apply(format_clp_full)
-                    st.dataframe(df_cruce_personas, hide_index=True, width='stretch')
+                    st.dataframe(df_cruce_personas, hide_index=True, use_container_width=True)
                     st.warning(
                         f"Se identificaron {len(df_cruce_personas)} proveedores con anomalías "
                         "y vínculos políticos registrados."
@@ -1335,7 +1335,7 @@ def _render_tab_cruces(df_filtrado, total_proveedores, total_compradores, n_trat
                     ]
                 if not df_fisc.empty:
                     df_fisc['gasto_total'] = df_fisc['gasto_total'].apply(format_clp_full)
-                    st.dataframe(df_fisc, hide_index=True, width='stretch')
+                    st.dataframe(df_fisc, hide_index=True, use_container_width=True)
                     st.warning(
                         f"Organismos compradores bajo fiscalización activa de la CGR: "
                         f"{df_fisc['nombre_comprador'].nunique()}."
@@ -1403,7 +1403,7 @@ def _render_tab_cruces(df_filtrado, total_proveedores, total_compradores, n_trat
                 if conflictos:
                     df_conflictos = pd.DataFrame(conflictos)
                     df_conflictos['gasto_total_proveedor'] = df_conflictos['gasto_total_proveedor'].apply(format_clp_full)
-                    st.dataframe(df_conflictos, hide_index=True, width='stretch')
+                    st.dataframe(df_conflictos, hide_index=True, use_container_width=True)
                     st.error(
                         f"Se detectaron {len(conflictos)} posibles conflictos de interés: "
                         "funcionarios con vínculos declarados a proveedores del Estado."
@@ -1463,7 +1463,7 @@ def _render_tab_datos(df_filtrado, filtro_global):
 
             st.dataframe(
                 dt_display,
-                width='stretch',
+                use_container_width=True,
                 height=500,
                 hide_index=True,
                 column_config={
@@ -1509,7 +1509,7 @@ def _render_tab_datos(df_filtrado, filtro_global):
                     file_name=f"licitaciones_{datetime.now().strftime('%Y%m%d')}.csv",
                     mime="text/csv"
                 )
-                st.dataframe(df_lic, width='stretch', height=500, hide_index=True)
+                st.dataframe(df_lic, use_container_width=True, height=500, hide_index=True)
             else:
                 st.info("No hay licitaciones cargadas aún.")
         except (OSError, pd.errors.DatabaseError) as exc:
@@ -2065,7 +2065,7 @@ def _render_tab_ia_impl(df_filtrado, prompt=None):
     col_chips = st.columns(len(_SUGGESTED_QUERIES))
     for i, (label, query) in enumerate(_SUGGESTED_QUERIES):
         with col_chips[i]:
-            if st.button(label, key=f"chip_{i}", width='stretch'):
+            if st.button(label, key=f"chip_{i}", use_container_width=True):
                 st.session_state["_pending_query"] = query
                 st.rerun()
 
@@ -2142,7 +2142,7 @@ def _render_tab_ia_impl(df_filtrado, prompt=None):
                 key="_ia_text_input",
             )
         with col_btn:
-            submitted = st.form_submit_button("Investigar", type="primary", width='stretch')
+            submitted = st.form_submit_button("Investigar", type="primary", use_container_width=True)
 
     # ── Procesar prompt explícito (desde arg o desde el form) ──
     effective_prompt = prompt or (user_query if submitted and user_query.strip() else None)
@@ -2214,7 +2214,7 @@ def _render_tab_servel(df_filtrado: pd.DataFrame):
                 ORDER BY SUM(monto_aporte) DESC
                 LIMIT 15
             """, conn)
-            st.dataframe(top_apt, width='stretch', hide_index=True)
+            st.dataframe(top_apt, use_container_width=True, hide_index=True)
 
             st.markdown("### 🎯 Top 15 Receptores (quién más recibió)")
             top_rec = pd.read_sql("""
@@ -2227,7 +2227,7 @@ def _render_tab_servel(df_filtrado: pd.DataFrame):
                 ORDER BY SUM(monto_aporte) DESC
                 LIMIT 15
             """, conn)
-            st.dataframe(top_rec, width='stretch', hide_index=True)
+            st.dataframe(top_rec, use_container_width=True, hide_index=True)
 
             st.markdown("### 🪞 Autodonaciones (aportante = receptor)")
             st.caption("Candidatos que se financiaron a sí mismos. Común pero útil para ver magnitud del aporte propio vs. externo.")
@@ -2246,7 +2246,7 @@ def _render_tab_servel(df_filtrado: pd.DataFrame):
                 ORDER BY SUM(monto_aporte) DESC
                 LIMIT 20
             """, conn)
-            st.dataframe(auto, width='stretch', hide_index=True)
+            st.dataframe(auto, use_container_width=True, hide_index=True)
 
             st.markdown("### 🔗 Cruce: aportantes que también son **proveedores del Estado**")
             st.caption(
@@ -2274,7 +2274,7 @@ def _render_tab_servel(df_filtrado: pd.DataFrame):
                 st.info("Sin cruces detectados aún.")
             else:
                 st.success(f"🚨 {len(cruce)} aportantes tipo empresa también aparecen como proveedores del Estado.")
-                st.dataframe(cruce, width='stretch', hide_index=True)
+                st.dataframe(cruce, use_container_width=True, hide_index=True)
 
             st.markdown("### 📊 Por elección / campaña")
             por_eleccion = pd.read_sql("""
@@ -2287,7 +2287,7 @@ def _render_tab_servel(df_filtrado: pd.DataFrame):
                 ORDER BY SUM(monto_aporte) DESC
                 LIMIT 20
             """, conn)
-            st.dataframe(por_eleccion, width='stretch', hide_index=True)
+            st.dataframe(por_eleccion, use_container_width=True, hide_index=True)
 
             # ═══════════════════════════════════════════════════════════
             # GASTOS SERVEL — Proveedores que facturaron a campañas
@@ -2332,7 +2332,7 @@ def _render_tab_servel(df_filtrado: pd.DataFrame):
                     st.info("Sin cruces generados. Ejecuta `py cargar_gastos_servel.py`.")
                 else:
                     st.success(f"🚨 **{len(cruce_g)}** proveedores de campaña son también proveedores del Estado (match por RUT exacto).")
-                    st.dataframe(cruce_g, width='stretch', hide_index=True)
+                    st.dataframe(cruce_g, use_container_width=True, hide_index=True)
 
                 st.markdown("### Top 15 proveedores de campaña (por monto facturado)")
                 top_prov_camp = pd.read_sql("""
@@ -2347,7 +2347,7 @@ def _render_tab_servel(df_filtrado: pd.DataFrame):
                     ORDER BY SUM(monto) DESC
                     LIMIT 15
                 """, conn)
-                st.dataframe(top_prov_camp, width='stretch', hide_index=True)
+                st.dataframe(top_prov_camp, use_container_width=True, hide_index=True)
 
                 st.markdown("### 🕸️ Red de flujos: aportante → candidato (top 20)")
                 st.caption("Visualización de quién financia a quién (top 20 aportes más grandes).")
@@ -2386,7 +2386,7 @@ def _render_tab_servel(df_filtrado: pd.DataFrame):
                         fig.update_layout(height=550, font=dict(size=11),
                                           margin=dict(l=5, r=5, t=30, b=5),
                                           title="Flujo de aportes (azul = aportante · rojo = receptor · morado = ambos)")
-                        st.plotly_chart(fig, width='stretch')
+                        st.plotly_chart(fig, use_container_width=True)
                 except Exception as exc:
                     st.caption(f"Grafo no disponible: {exc}")
 
@@ -2401,7 +2401,7 @@ def main():
     col_t1, col_t2, col_t3 = st.columns([0.06, 0.64, 0.3])
     with col_t1:
         if os.path.exists(_LOGO_PATH):
-            st.image(_LOGO_PATH, width='stretch')
+            st.image(_LOGO_PATH, use_container_width=True)
     with col_t2:
         st.title("Ojo del Pueblo")
         st.caption("Plataforma de fiscalización ciudadana — Compras públicas del Estado de Chile")
@@ -2663,7 +2663,12 @@ def main():
             st.code(_tb.format_exc(), language="python")
 
     with tab_estadisticas:
-        st.write("Panel General desactivado temporalmente — build V5")
+        _safe_tab(
+            "Panel General", _render_tab_general,
+            df_filtrado, total_oc, total_gasto,
+            total_proveedores, total_compradores,
+            n_trato_directo,
+        )
     with tab_cruce:
         _safe_tab(
             "Cruces Forenses", _render_tab_cruces,

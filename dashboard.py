@@ -2654,8 +2654,6 @@ def main():
     if _last_btn_response:
         _render_inline_response(_last_btn_response)
 
-    tab_estadisticas, tab_cruce, tab_servel, tab_registro, tab_medios, tab_mira, tab_analistas, tab_ia = st.tabs(tab_names)
-
     def _safe_tab(label, render_fn, *args, **kwargs):
         """Ejecuta el render de un tab atrapando cualquier excepcion para que
         no propague y deje las demas tabs sin renderizar."""
@@ -2667,30 +2665,39 @@ def main():
             st.error(f"❌ No se pudo cargar '{label}': {type(_exc).__name__}: {_exc}")
             st.code(_tb.format_exc(), language="python")
 
-    with tab_estadisticas:
+    with st.sidebar:
+        st.markdown("<div style='margin:12px 0; border-top:1px solid rgba(51,65,85,0.3);'></div>", unsafe_allow_html=True)
+        st.markdown(
+            "<p style='color:#475569; font-size:0.7rem; text-transform:uppercase; "
+            "letter-spacing:0.08em; font-weight:600; margin-bottom:4px;'>Navegación</p>",
+            unsafe_allow_html=True,
+        )
+        active_tab = st.radio("Módulos", tab_names, label_visibility="collapsed")
+
+    if active_tab == "Panel General":
         _safe_tab(
             "Panel General", _render_tab_general,
             df_filtrado, total_gasto, total_oc,
             total_proveedores, total_compradores,
             pct_td, n_trato_directo,
         )
-    with tab_cruce:
+    elif active_tab == "Cruces Forenses":
         _safe_tab(
             "Cruces Forenses", _render_tab_cruces,
             df_filtrado, total_proveedores, total_compradores,
             n_trato_directo, filtro_global,
         )
-    with tab_servel:
+    elif active_tab == "Aportes SERVEL":
         _safe_tab("Aportes SERVEL", _render_tab_servel, df_filtrado)
-    with tab_registro:
+    elif active_tab == "Datos Crudos":
         _safe_tab("Datos Crudos", _render_tab_datos, df_filtrado, filtro_global)
-    with tab_medios:
+    elif active_tab == "Fuentes":
         _safe_tab("Fuentes", _render_tab_fuentes, df_filtrado)
-    with tab_mira:
+    elif active_tab == "En la Mira":
         _safe_tab("En la Mira", _render_tab_mira, df_filtrado)
-    with tab_analistas:
+    elif active_tab == "Denuncias":
         _safe_tab("Denuncias", _render_tab_denuncias, df_filtrado)
-    with tab_ia:
+    elif active_tab == "Asistente IA":
         _safe_tab("Asistente IA", _render_tab_ia, df_filtrado)
 
     # Footer (share + disclaimer)

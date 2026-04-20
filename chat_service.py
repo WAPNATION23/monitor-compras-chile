@@ -86,7 +86,10 @@ _STOPWORDS = frozenset({
     "cual", "cuando", "entre", "pero", "sin", "mas", "sus", "ese", "esa",
     "esos", "esas", "fue", "ser", "han", "era", "hoy", "dia", "ver", "quiero",
     "investigar", "investiga", "buscar", "arma", "expediente", "dime", "quien",
-    "quienes", "cuales", "caso", "crear", "procede", "claro",
+    "quienes", "cuales", "caso", "crear", "procede", "claro", "proveedor",
+    "rut", "organismo", "empresa", "persona", "cgr", "abusa", "anomalias",
+    "anomalías", "vinculos", "vínculos", "politicos", "políticos",
+    "fiscalizaciones", "aportes", "electorales", "trato", "directo", "sospechosos",
 })
 
 # ──────────────────────────────────────────────────────────────────────────
@@ -313,26 +316,44 @@ def _extract_keywords(text: str) -> list[str]:
 def build_db_context(prompt: str) -> str:
     """Busca en la DB local y en la API de Mercado Público para armar contexto."""
     db_context = ""
+    
+    # 1. Prioridad: Buscar por RUT exacto si viene en el prompt
+    m_rut = re.search(r"RUT\s+([\d\.\-Kk]+)", prompt, re.IGNORECASE)
+    rut_detected = m_rut.group(1).replace(".", "").strip() if m_rut else None
+
     palabras = _extract_keywords(prompt)
-    if not palabras:
+    if not palabras and not rut_detected:
         return db_context
 
     try:
         with sqlite3.connect(DB_PATH) as conn:
             # Proveedores
-            params = [f"%{p}%" for p in palabras[:5]]
-            conditions = " OR ".join(["nombre_proveedor LIKE ?" for _ in params])
-            rows = conn.execute(
-                f"""
-                SELECT codigo_oc, nombre_proveedor, monto_total_item, nombre_comprador,
-                       tipo_oc, categoria, fecha_creacion, rut_proveedor
-                FROM ordenes_items
-                WHERE {conditions}
-                ORDER BY monto_total_item DESC
-                LIMIT 10
-                """,
-                params,
-            ).fetchall()
+            if rut_detected:
+                rows = conn.execute(
+                    """
+                    SELECT codigo_oc, nombre_proveedor, monto_total_item, nombre_comprador,
+                           tipo_oc, categoria, fecha_creacion, rut_proveedor
+                    FROM ordenes_items
+                    WHERE rut_proveedor = ?
+                    ORDER BY monto_total_item DESC
+                    LIMIT 20
+                    """,
+                    (rut_detected,)
+                ).fetchall()
+            else:
+                params = [f"%{p}%" for p in palabras[:5]]
+                conditions = " AND ".join(["nombre_proveedor LIKE ?" for _ in params])
+                rows = conn.execute(
+                    f"""
+                    SELECT codigo_oc, nombre_proveedor, monto_total_item, nombre_comprador,
+                           tipo_oc, categoria, fecha_creacion, rut_proveedor
+                    FROM ordenes_items
+                    WHERE {conditions}
+                    ORDER BY monto_total_item DESC
+                    LIMIT 10
+                    """,
+                    params,
+                ).fetchall()
 
             if rows:
                 db_context += f"\n### DATOS ENCONTRADOS EN BASE DE DATOS LOCAL ({len(rows)} resultados):\n"

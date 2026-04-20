@@ -2654,14 +2654,14 @@ def main():
     def _safe_tab(label, render_fn, *args, **kwargs):
         """Ejecuta el render de un tab atrapando cualquier excepcion para que
         no propague y deje las demas tabs sin renderizar."""
-        st.caption(f"⏳ {label} — cargando...")
+        st.warning(f"⏳ V8 — {label}")
         try:
             render_fn(*args, **kwargs)
-            st.caption(f"✅ {label} — OK")
-        except Exception as _exc:  # noqa: BLE001
+            st.success(f"✅ V8 — {label} OK")
+        except BaseException as _exc:  # noqa: BLE001
             import traceback as _tb
             logger.exception("Error en tab %s", label)
-            st.error(f"❌ No se pudo cargar '{label}': {type(_exc).__name__}: {_exc}")
+            st.error(f"❌ V8 CRASH '{label}': {type(_exc).__name__}: {_exc}")
             st.code(_tb.format_exc(), language="python")
 
     with tab_estadisticas:
@@ -2690,8 +2690,8 @@ def main():
     with tab_ia:
         _safe_tab("Asistente IA", _render_tab_ia, df_filtrado)
 
-    # Footer (share + disclaimer)
-    _render_footer_share(total_oc, total_gasto)
+    # Marker final — si esto aparece, el script completó todos los tabs
+    st.sidebar.success("V8 — script completó 8/8 tabs")
 
 
 def _render_inline_response(_last_btn_response: dict) -> None:

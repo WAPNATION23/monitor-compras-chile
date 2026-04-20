@@ -46,27 +46,33 @@ def load_data() -> pd.DataFrame:
 
 def init_feedback_db() -> None:
     """Crea la tabla de feedback comunitario si no existe."""
-    with sqlite3.connect(DB_PATH) as conn:
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS feedback_comunidad (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                tipo_reporte TEXT,
-                dato_reportado TEXT,
-                comentario TEXT,
-                fecha_reporte TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-        conn.commit()
+    try:
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS feedback_comunidad (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    tipo_reporte TEXT,
+                    dato_reportado TEXT,
+                    comentario TEXT,
+                    fecha_reporte TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            conn.commit()
+    except sqlite3.OperationalError:
+        pass  # read-only FS on Cloud
 
 
 def save_feedback(tipo: str, dato: str, comentario: str) -> None:
     """Guarda un reporte de la comunidad."""
-    with sqlite3.connect(DB_PATH) as conn:
-        conn.execute(
-            "INSERT INTO feedback_comunidad (tipo_reporte, dato_reportado, comentario) VALUES (?, ?, ?)",
-            (tipo, dato, comentario),
-        )
-        conn.commit()
+    try:
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.execute(
+                "INSERT INTO feedback_comunidad (tipo_reporte, dato_reportado, comentario) VALUES (?, ?, ?)",
+                (tipo, dato, comentario),
+            )
+            conn.commit()
+    except sqlite3.OperationalError:
+        pass  # read-only FS on Cloud
 
 
 def load_licitaciones(limit: int = 5000) -> pd.DataFrame:
@@ -85,6 +91,13 @@ def load_licitaciones(limit: int = 5000) -> pd.DataFrame:
 
 def get_rate_limit_usage(ip: str, fecha: str) -> int:
     """Obtiene cuántas consultas hizo una IP en una fecha dada."""
+    try:
+        return _get_rate_limit_usage_inner(ip, fecha)
+    except sqlite3.OperationalError:
+        return 0
+
+
+def _get_rate_limit_usage_inner(ip: str, fecha: str) -> int:
     with sqlite3.connect(DB_PATH) as conn:
         conn.execute(
             """
@@ -105,26 +118,29 @@ def get_rate_limit_usage(ip: str, fecha: str) -> int:
 
 def increment_rate_limit_usage(ip: str, fecha: str) -> None:
     """Incrementa el contador diario de consultas para una IP."""
-    with sqlite3.connect(DB_PATH) as conn:
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS rate_limit (
-                ip TEXT,
-                fecha TEXT,
-                consultas INTEGER,
-                PRIMARY KEY(ip, fecha)
+    try:
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS rate_limit (
+                    ip TEXT,
+                    fecha TEXT,
+                    consultas INTEGER,
+                    PRIMARY KEY(ip, fecha)
+                )
+                """
             )
-            """
-        )
-        conn.execute(
-            """
-            INSERT INTO rate_limit (ip, fecha, consultas)
-            VALUES (?, ?, 1)
-            ON CONFLICT(ip, fecha) DO UPDATE SET consultas = consultas + 1
-            """,
-            (ip, fecha),
-        )
-        conn.commit()
+            conn.execute(
+                """
+                INSERT INTO rate_limit (ip, fecha, consultas)
+                VALUES (?, ?, 1)
+                ON CONFLICT(ip, fecha) DO UPDATE SET consultas = consultas + 1
+                """,
+                (ip, fecha),
+            )
+            conn.commit()
+    except sqlite3.OperationalError:
+        pass  # read-only FS on Cloud — skip rate limiting gracefully
 
 
 def format_clp(value: float) -> str:

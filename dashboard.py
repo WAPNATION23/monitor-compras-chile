@@ -2632,8 +2632,13 @@ def main():
             f"🔍 Investigando: *{_pending[:80]}{'…' if len(_pending) > 80 else ''}*",
             expanded=True,
         ) as _status:
-            _process_ia_query(_pending, is_from_button=True, status_ctx=_status)
-            _status.update(label="✅ Investigación completada", state="complete", expanded=False)
+            try:
+                _process_ia_query(_pending, is_from_button=True, status_ctx=_status)
+                _status.update(label="✅ Investigación completada", state="complete", expanded=False)
+            except Exception as _ia_exc:
+                logger.exception("Error en _process_ia_query")
+                _status.update(label="❌ Error en investigación", state="error", expanded=False)
+                st.error(f"Error al investigar: {type(_ia_exc).__name__}: {_ia_exc}")
         # Al terminar, rerun al MODO B donde se muestra la respuesta inline +
         # todas las pestañas con contenido completo.
         st.rerun()
@@ -2654,14 +2659,12 @@ def main():
     def _safe_tab(label, render_fn, *args, **kwargs):
         """Ejecuta el render de un tab atrapando cualquier excepcion para que
         no propague y deje las demas tabs sin renderizar."""
-        st.warning(f"⏳ V8 — {label}")
         try:
             render_fn(*args, **kwargs)
-            st.success(f"✅ V8 — {label} OK")
-        except BaseException as _exc:  # noqa: BLE001
+        except Exception as _exc:  # noqa: BLE001
             import traceback as _tb
             logger.exception("Error en tab %s", label)
-            st.error(f"❌ V8 CRASH '{label}': {type(_exc).__name__}: {_exc}")
+            st.error(f"❌ No se pudo cargar '{label}': {type(_exc).__name__}: {_exc}")
             st.code(_tb.format_exc(), language="python")
 
     with tab_estadisticas:
@@ -2690,8 +2693,8 @@ def main():
     with tab_ia:
         _safe_tab("Asistente IA", _render_tab_ia, df_filtrado)
 
-    # Marker final — si esto aparece, el script completó todos los tabs
-    st.sidebar.success("V8 — script completó 8/8 tabs")
+    # Footer (share + disclaimer)
+    _render_footer_share(total_oc, total_gasto)
 
 
 def _render_inline_response(_last_btn_response: dict) -> None:

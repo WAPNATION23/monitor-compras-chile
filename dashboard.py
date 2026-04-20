@@ -2654,8 +2654,10 @@ def main():
     def _safe_tab(label, render_fn, *args, **kwargs):
         """Ejecuta el render de un tab atrapando cualquier excepcion para que
         no propague y deje las demas tabs sin renderizar."""
+        st.caption(f"⏳ {label} — cargando...")
         try:
             render_fn(*args, **kwargs)
+            st.caption(f"✅ {label} — OK")
         except Exception as _exc:  # noqa: BLE001
             import traceback as _tb
             logger.exception("Error en tab %s", label)
@@ -2665,9 +2667,9 @@ def main():
     with tab_estadisticas:
         _safe_tab(
             "Panel General", _render_tab_general,
-            df_filtrado, total_oc, total_gasto,
+            df_filtrado, total_gasto, total_oc,
             total_proveedores, total_compradores,
-            n_trato_directo,
+            pct_td, n_trato_directo,
         )
     with tab_cruce:
         _safe_tab(

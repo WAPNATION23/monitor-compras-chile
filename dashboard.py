@@ -2395,8 +2395,6 @@ def _render_tab_servel(df_filtrado: pd.DataFrame):
 
 
 def main():
-    init_feedback_db()
-
     # ENCABEZADO PRINCIPAL
     col_t1, col_t2, col_t3 = st.columns([0.06, 0.64, 0.3])
     with col_t1:
@@ -2443,6 +2441,12 @@ def main():
             from processor import DataProcessor
             DataProcessor()
             logger.info("Seed no encontrado — DB creada vacía: %s", DB_PATH)
+
+    # Ahora que la BD principal está garantizada y sana, inicializamos el feedback
+    try:
+        init_feedback_db()
+    except Exception as exc:
+        logger.error("Error inicializando DB de feedback: %s", exc)
 
     # CARGA DE DATOS
     try:

@@ -539,7 +539,7 @@ def call_deepseek(messages: list[dict], web_context: str, db_context: str,
     system_prompt = build_system_prompt(web_context, db_context, forensic_context)
 
     payload = {
-        "model": "deepseek-chat",
+        "model": "deepseek-v4-pro",
         "messages": [{"role": "system", "content": system_prompt}]
         + [{"role": m["role"], "content": m["content"]} for m in messages[-8:]],
         "temperature": 0.4,
@@ -558,7 +558,7 @@ def call_deepseek(messages: list[dict], web_context: str, db_context: str,
                     "Content-Type": "application/json",
                 },
                 json=payload,
-                timeout=60,
+                timeout=90,
             )
             if response.status_code == 200:
                 return response.json()["choices"][0]["message"]["content"]

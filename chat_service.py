@@ -419,23 +419,89 @@ def build_db_context(prompt: str) -> str:
 
 
 def build_web_context(prompt: str) -> str:
-    """Busca contexto web vía DuckDuckGo. Timeout estricto para no bloquear el UI."""
+    """Busca contexto web vía DuckDuckGo en MÚLTIPLES fuentes OSINT chilenas.
+
+    Fuentes consultadas:
+      - Dateas.com: publicaciones legales, avisos judiciales, diario oficial
+      - Cooperativa.cl: avisos legales (pérdida de cheques, quiebras, etc.)
+      - TodoLicitaciones / LicitaPyme / ChilePyme: licitaciones y proveedores
+      - Fuentes periodísticas: CIPER, interferencia.cl, BioBioChile
+      - Contraloria / corrupción / fundaciones: contexto general
+    """
     # Permite desactivarla totalmente via env var (Streamlit Cloud a veces bloquea DDG)
     if os.getenv("DISABLE_WEB_SEARCH", "").lower() in ("1", "true", "yes"):
         return "[Búsqueda web desactivada por configuración.]"
+
+    keywords = _extract_keywords(prompt)
+    # Rebuild a clean search term from the original prompt (not stopword-filtered)
+    # but cap it to avoid DDG rejecting overly long queries
+    search_term = " ".join(prompt.split()[:12])
+
+    # Define targeted search queries for each OSINT source cluster
+    _OSINT_QUERIES = [
+        # 1. Fuentes judiciales / legales / Diario Oficial
+        {
+            "query": f"site:dateas.com {search_term} chile",
+            "label": "Dateas.com (Publicaciones legales / Diario Oficial)",
+            "max_results": 4,
+        },
+        # 2. Avisos legales en medios (pérdida de cheques, quiebras, etc.)
+        {
+            "query": f"{search_term} site:cooperativa.cl aviso legal OR publicacion judicial",
+            "label": "Cooperativa.cl (Avisos legales)",
+            "max_results": 3,
+        },
+        # 3. Licitaciones y proveedores
+        {
+            "query": f"{search_term} chile site:todolicitaciones.cl OR site:licitapyme.cl OR site:chilepyme.cl",
+            "label": "Portales de Licitaciones (TodoLicitaciones / LicitaPyme / ChilePyme)",
+            "max_results": 3,
+        },
+        # 4. Contexto periodístico / corrupción / contraloría
+        {
+            "query": f"{search_term} chile corrupcion OR contraloria OR fundaciones OR licitacion OR fraude",
+            "label": "Fuentes periodísticas y judiciales",
+            "max_results": 5,
+        },
+    ]
+
+    all_parts = []
+
     try:
         from duckduckgo_search import DDGS
 
-        with DDGS(timeout=8) as ddgs:
-            query_osint = f"{prompt} chile contraloria OR corrupcion OR fundaciones OR santiago"
-            resultados = list(ddgs.text(query_osint, region="cl-es", safesearch="off", max_results=5))
-            parts = []
-            for r in resultados:
-                parts.append(f"TITULO: {r.get('title')}\nTEXTO: {r.get('body')}\n")
-            return "\n".join(parts)
+        with DDGS(timeout=10) as ddgs:
+            for source in _OSINT_QUERIES:
+                try:
+                    resultados = list(ddgs.text(
+                        source["query"],
+                        region="cl-es",
+                        safesearch="off",
+                        max_results=source["max_results"],
+                    ))
+                    if resultados:
+                        all_parts.append(f"\n### {source['label']} ###")
+                        for r in resultados:
+                            title = r.get("title", "")
+                            body = r.get("body", "")
+                            href = r.get("href", "")
+                            all_parts.append(
+                                f"TITULO: {title}\n"
+                                f"TEXTO: {body}\n"
+                                f"URL: {href}\n"
+                            )
+                except Exception as exc:
+                    logger.debug("Error en búsqueda OSINT [%s]: %s", source["label"], exc)
+                    continue
+
     except Exception as exc:
         logger.warning("Error en búsqueda web: %s", exc)
         return "[No se pudo acceder a búsqueda web. Usando solo memoria interna.]"
+
+    if not all_parts:
+        return "[Sin resultados en fuentes OSINT web.]"
+
+    return "\n".join(all_parts)
 
 
 # ──────────────────────────────────────────────────────────────────────────
@@ -494,36 +560,47 @@ def build_system_prompt(web_context: str, db_context: str,
     """Construye el system prompt para DeepSeek con inteligencia forense."""
     fecha_actual = datetime.now().strftime("%Y-%m-%d")
     return (
-        "Eres el 'Cerebro Forense' de la plataforma anticorrupción 'Ojo del Pueblo'. "
-        "Tu misión: analizar datos financieros y políticos con rigor forense. "
+        "Eres el 'Cerebro Forense' de la plataforma anticorrupcion 'Ojo del Pueblo'. "
+        "Tu mision: analizar datos financieros y politicos con rigor forense. "
         "Tono: directo, profesional, basado en evidencia (analista OSINT senior).\n"
         f"Fecha de hoy: {fecha_actual}.\n"
-        "\n══════════════════════════════════════════\n"
-        "██ INTELIGENCIA FORENSE (Herramientas Automáticas) ██\n"
-        "══════════════════════════════════════════\n"
+        "\n======================================\n"
+        "== INTELIGENCIA FORENSE (Herramientas Automaticas) ==\n"
+        "======================================\n"
         f"{forensic_context}\n"
-        "\n══════════════════════════════════════════\n"
-        "██ BASE DE DATOS LOCAL (Órdenes de Compra) ██\n"
-        "══════════════════════════════════════════\n"
+        "\n======================================\n"
+        "== BASE DE DATOS LOCAL (Ordenes de Compra) ==\n"
+        "======================================\n"
         f"{db_context}\n"
-        "\n══════════════════════════════════════════\n"
-        "██ CONTEXTO WEB EN TIEMPO REAL ██\n"
-        "══════════════════════════════════════════\n"
+        "\n======================================\n"
+        "== CONTEXTO WEB OSINT (11 Fuentes en Tiempo Real) ==\n"
+        "======================================\n"
+        "Fuentes web consultadas: Dateas.com (publicaciones legales, Diario Oficial), "
+        "Cooperativa.cl (avisos legales, perdida de cheques, quiebras), "
+        "TodoLicitaciones / LicitaPyme / ChilePyme (licitaciones publicas), "
+        "CIPER / BioBioChile / interferencia.cl (periodismo investigativo), "
+        "ademas de las 7 fuentes oficiales (SERVEL, InfoLobby, Contraloria, "
+        "InfoProbidad, Mercado Publico, datos.gob.cl, CGR SICA).\n\n"
         f"{web_context}\n"
         "\n##############################################################\n"
         "DIRECTRICES (OBLIGATORIO):\n"
-        "1. Habla como un analista entregando un expediente clasificado. Cero frases genéricas.\n"
-        "2. Si la INTELIGENCIA FORENSE contiene datos de las 7 fuentes oficiales (SERVEL, InfoLobby, "
-        "Contraloría, InfoProbidad, Mercado Público), ÚSALOS como evidencia primaria.\n"
-        "3. Estructura la respuesta así:\n"
-        "   - **🔎 PERFIL DE INTERÉS:** (Quién es, RUT, cargo, vínculos)\n"
-        "   - **💰 HISTORIAL FINANCIERO:** (Contratos, montos, fechas, tipo de compra, concentración)\n"
-        "   - **🚨 ALERTAS Y ANOMALÍAS:** (Score de riesgo, patrones sospechosos, cruces SERVEL, conflictos de interés)\n"
-        "   - **📋 RECOMENDACIÓN DE INVESTIGACIÓN:** (Qué profundizar, qué fuentes consultar)\n"
-        "4. Cita datos exactos: códigos OC, RUTs, montos, fechas, scores de riesgo.\n"
-        "5. Si NO encuentras datos del objetivo, dilo y sugiere búsquedas alternativas.\n"
-        "6. [HERRAMIENTA AUTÓNOMA — INFILTRACIÓN] Si detectas un RUT (ej. '76.111.222-3'), "
-        "puedes ordenar descargar su historial completo añadiendo al final de tu respuesta: "
+        "1. Habla como un analista entregando un expediente clasificado. Cero frases genericas.\n"
+        "2. Usa TODAS las fuentes disponibles como evidencia. Las fuentes web OSINT "
+        "(Dateas, Cooperativa avisos legales, portales de licitaciones) son TAN importantes "
+        "como las fuentes oficiales. Si Dateas muestra una publicacion legal (perdida de "
+        "cheques, quiebra, constitucion de sociedad), CITALA con URL.\n"
+        "3. Estructura la respuesta asi:\n"
+        "   - **PERFIL DE INTERES:** (Quien es, RUT, cargo, vinculos)\n"
+        "   - **HISTORIAL FINANCIERO:** (Contratos, montos, fechas, tipo de compra, concentracion)\n"
+        "   - **ALERTAS Y ANOMALIAS:** (Score de riesgo, patrones sospechosos, cruces SERVEL, conflictos de interes)\n"
+        "   - **REGISTROS LEGALES/JUDICIALES:** (Publicaciones en Diario Oficial, avisos legales, "
+        "perdida de documentos, quiebras, constituciones de sociedades — de Dateas y Cooperativa)\n"
+        "   - **PRESENCIA EN LICITACIONES:** (Apariciones en TodoLicitaciones, LicitaPyme, ChilePyme)\n"
+        "   - **RECOMENDACION DE INVESTIGACION:** (Que profundizar, que fuentes consultar)\n"
+        "4. Cita datos exactos: codigos OC, RUTs, montos, fechas, scores de riesgo, URLs.\n"
+        "5. Si NO encuentras datos del objetivo, dilo y sugiere busquedas alternativas.\n"
+        "6. [HERRAMIENTA AUTONOMA — INFILTRACION] Si detectas un RUT (ej. '76.111.222-3'), "
+        "puedes ordenar descargar su historial completo anadiendo al final de tu respuesta: "
         "`[EJECUTAR_INFILTRACION: 76.111.222-3]`\n"
     )
 

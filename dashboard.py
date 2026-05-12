@@ -1644,6 +1644,58 @@ def _render_tab_fuentes(df_filtrado):
         )
         st.markdown("<a href='https://www.dipres.gob.cl' target='_blank' class='btn-portal'>Ir a DIPRES</a>", unsafe_allow_html=True)
 
+    # ── OSINT Web: avisos legales, licitaciones y publicaciones judiciales ──
+    st.markdown(
+        '<div class="section-header" style="margin-top:24px">'
+        '<div class="icon purple">🌐</div>'
+        '<div><h3>OSINT Web — Avisos Legales y Licitaciones</h3>'
+        '<p>El Asistente IA consulta estas fuentes en tiempo real vía DuckDuckGo '
+        '(publicaciones del Diario Oficial, pérdida de cheques, quiebras, '
+        'apariciones en licitaciones).</p></div>'
+        '</div>',
+        unsafe_allow_html=True,
+    )
+
+    col_o1, col_o2, col_o3 = st.columns(3)
+
+    with col_o1:
+        st.markdown(
+            '<div class="source-card">'
+            '<span class="badge data">PUBLICACIONES LEGALES</span>'
+            '<h4>Dateas.com</h4>'
+            '<p>Buscador del Diario Oficial: constituciones de sociedades, '
+            'avisos judiciales, pérdida de documentos, quiebras y publicaciones legales '
+            'desde 2010.</p>'
+            '</div>',
+            unsafe_allow_html=True,
+        )
+        st.markdown("<a href='https://www.dateas.com/' target='_blank' class='btn-portal'>Ir a Dateas</a>", unsafe_allow_html=True)
+
+    with col_o2:
+        st.markdown(
+            '<div class="source-card">'
+            '<span class="badge press">AVISOS LEGALES</span>'
+            '<h4>Cooperativa.cl — Legales</h4>'
+            '<p>Sección de avisos legales: pérdida de cheques, citaciones, '
+            'remates judiciales y publicaciones obligatorias.</p>'
+            '</div>',
+            unsafe_allow_html=True,
+        )
+        st.markdown("<a href='https://www.cooperativa.cl/noticias/site/edic/base/port/legales.html' target='_blank' class='btn-portal'>Avisos Legales</a>", unsafe_allow_html=True)
+
+    with col_o3:
+        st.markdown(
+            '<div class="source-card">'
+            '<span class="badge data">LICITACIONES</span>'
+            '<h4>TodoLicitaciones / LicitaPyme / ChilePyme</h4>'
+            '<p>Portales agregadores de licitaciones públicas y privadas. '
+            'Útil para rastrear historial de proveedores y patrones de adjudicación '
+            'fuera de Mercado Público.</p>'
+            '</div>',
+            unsafe_allow_html=True,
+        )
+        st.markdown("<a href='https://www.todolicitaciones.cl/' target='_blank' class='btn-portal'>TodoLicitaciones</a>", unsafe_allow_html=True)
+
     # ══════════════════════════════════════════════════════════════════════════
     # PESTAÑA 5: EN LA MIRA — Alertas de Personas de Interés Público
 

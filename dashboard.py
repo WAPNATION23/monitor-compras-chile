@@ -2687,18 +2687,9 @@ def main():
     st.markdown(
         """
         <style>
-        /* Tabs scrollables horizontalmente en mobile */
-        div[role='radiogroup'] {
-            overflow-x: auto !important;
-            flex-wrap: nowrap !important;
-            scrollbar-width: thin;
-            -webkit-overflow-scrolling: touch;
-        }
-        div[role='radiogroup']::-webkit-scrollbar { height: 4px; }
-        div[role='radiogroup'] > label {
-            white-space: nowrap !important;
-            flex-shrink: 0 !important;
-        }
+        /* Mobile: padding compacto, fuentes adaptadas, burbujas chat anchas.
+           El grid de tabs se maneja en su propio bloque CSS más abajo
+           (donde se renderizan los radios). */
         @media (max-width: 768px) {
             .block-container {
                 padding-left: 0.6rem !important;
@@ -3080,8 +3071,73 @@ def main():
     # Barra lateral CSS hack para disimular el radio como pestañas (opcional)
     st.markdown(
         """<style>
-        div[role='radiogroup'] { flex-wrap: wrap; gap: 8px; margin-bottom: 20px; }
-        div[role='radiogroup'] > label { padding: 8px 16px; background: rgba(30,41,59,0.5); border-radius: 8px; cursor: pointer; }
+        /* Tabs como botones en grid 4x2 alineados a la izquierda.
+           Ocultamos el círculo del radio y dejamos sólo la etiqueta clickeable. */
+        div[data-testid="stRadio"] > div[role='radiogroup'] {
+            display: grid !important;
+            grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+            gap: 10px !important;
+            max-width: 820px !important;
+            margin: 8px 0 22px 0 !important;
+            justify-content: start !important;
+        }
+        /* Ocultar el circulito del radio */
+        div[data-testid="stRadio"] > div[role='radiogroup'] > label > div:first-child {
+            display: none !important;
+        }
+        /* Cada label = botón tipo pestaña */
+        div[data-testid="stRadio"] > div[role='radiogroup'] > label {
+            display: flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+            text-align: center !important;
+            padding: 11px 14px !important;
+            background: linear-gradient(135deg, rgba(15,23,42,0.7) 0%, rgba(30,41,59,0.5) 100%) !important;
+            border: 1px solid rgba(51,65,85,0.55) !important;
+            border-radius: 10px !important;
+            cursor: pointer !important;
+            transition: all 0.18s ease !important;
+            min-height: 46px !important;
+            font-size: 0.86rem !important;
+            font-weight: 600 !important;
+            color: #94A3B8 !important;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.2);
+        }
+        div[data-testid="stRadio"] > div[role='radiogroup'] > label:hover {
+            border-color: rgba(96,165,250,0.55) !important;
+            background: linear-gradient(135deg, rgba(30,41,59,0.85) 0%, rgba(51,65,85,0.55) 100%) !important;
+            color: #F1F5F9 !important;
+            transform: translateY(-1px);
+        }
+        /* Activa: borde azul + glow */
+        div[data-testid="stRadio"] > div[role='radiogroup'] > label:has(input:checked) {
+            border-color: #60A5FA !important;
+            background: linear-gradient(135deg, rgba(37,99,235,0.25) 0%, rgba(96,165,250,0.18) 100%) !important;
+            color: #F1F5F9 !important;
+            box-shadow: 0 4px 14px rgba(37,99,235,0.35);
+        }
+        /* Texto del label sin envoltorios extra */
+        div[data-testid="stRadio"] > div[role='radiogroup'] > label > div:last-child {
+            margin: 0 !important; padding: 0 !important;
+        }
+        div[data-testid="stRadio"] > div[role='radiogroup'] > label p {
+            margin: 0 !important; font-size: 0.86rem !important; font-weight: 600 !important;
+        }
+        /* Sidebar coexistencia: respetar ancho del expander/hamburguesa */
+        section[data-testid="stSidebar"] { z-index: 5; }
+
+        /* Mobile: 2 columnas en lugar de 4 */
+        @media (max-width: 768px) {
+            div[data-testid="stRadio"] > div[role='radiogroup'] {
+                grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+                gap: 8px !important;
+            }
+            div[data-testid="stRadio"] > div[role='radiogroup'] > label {
+                padding: 10px 8px !important;
+                font-size: 0.78rem !important;
+                min-height: 42px !important;
+            }
+        }
         </style>""",
         unsafe_allow_html=True
     )

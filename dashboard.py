@@ -16,7 +16,7 @@ import requests
 import pandas as pd
 import plotly.express as px
 import streamlit as st
-from datetime import datetime
+from datetime import datetime, timezone
 
 from queries import (
     DB_PATH,
@@ -2718,11 +2718,39 @@ def main():
         st.title("Ojo del Pueblo")
         st.caption("Plataforma de fiscalización ciudadana — Compras públicas del Estado de Chile")
     with col_t3:
+        # ── Indicador de frescura de datos (lee el marker de daily_update) ──
+        try:
+            from daily_update import last_update_dt, hours_since_last_update
+            _last = last_update_dt()
+            _hrs = hours_since_last_update()
+        except Exception:  # noqa: BLE001
+            _last = None
+            _hrs = None
+        if _last is not None:
+            # Convertir UTC → hora local Chile (UTC-3) para mostrar
+            try:
+                _scl = _last.astimezone(timezone.utc).astimezone()
+                _ts_label = _scl.strftime('%d/%m/%Y %H:%M')
+            except Exception:  # noqa: BLE001
+                _ts_label = _last.strftime('%d/%m/%Y %H:%M')
+            if _hrs is None or _hrs <= 24:
+                _color = "#10B981"  # verde
+                _badge = "● Datos al día"
+            elif _hrs <= 48:
+                _color = "#FBBF24"  # amber
+                _badge = f"● {_hrs:.0f}h sin actualizar"
+            else:
+                _color = "#EF4444"  # rojo
+                _badge = f"● {_hrs:.0f}h sin actualizar"
+        else:
+            _ts_label = "—"
+            _color = "#64748B"
+            _badge = "● Sin datos de actualización"
         st.markdown(
             f"<div style='text-align:right; padding-top:12px;'>"
             f"<span style='color:#475569; font-size:0.75rem;'>Última actualización</span><br>"
-            f"<span style='color:#94A3B8; font-size:0.85rem; font-weight:600;'>"
-            f"{datetime.now().strftime('%d/%m/%Y %H:%M')}</span>"
+            f"<span style='color:#94A3B8; font-size:0.85rem; font-weight:600;'>{_ts_label}</span><br>"
+            f"<span style='color:{_color}; font-size:0.7rem; font-weight:600;'>{_badge}</span>"
             f"</div>",
             unsafe_allow_html=True,
         )
@@ -2761,6 +2789,13 @@ def main():
         init_feedback_db()
     except Exception as exc:
         logger.error("Error inicializando DB de feedback: %s", exc)
+
+    # ── Arrancar scheduler de actualización diaria (idempotente) ──
+    try:
+        from daily_update import start_background_scheduler
+        start_background_scheduler()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("No se pudo arrancar scheduler diario: %s", exc)
 
     # CARGA DE DATOS
     try:
@@ -2956,6 +2991,27 @@ def main():
             """,
             unsafe_allow_html=True,
         )
+
+        # ── Botón manual de actualización ──
+        st.markdown("<div style='margin-top:10px;'></div>", unsafe_allow_html=True)
+        if st.button("🔄 Actualizar datos ahora", use_container_width=True,
+                     help="Descarga las OC y licitaciones más recientes desde Mercado Público"):
+            try:
+                from daily_update import update_all
+                with st.spinner("Conectando a Mercado Público... (puede tardar varios minutos)"):
+                    _stats = update_all(force=True)
+                if _stats.get("error"):
+                    st.error(f"Error: {_stats['error']}")
+                elif _stats.get("skipped"):
+                    st.info(_stats.get("reason", "Sin cambios"))
+                else:
+                    _ocs = (_stats.get("ordenes", {}) or {}).get("items_insertados", 0)
+                    _lics = (_stats.get("licitaciones", {}) or {}).get("licitaciones_insertadas", 0)
+                    st.success(f"✅ Actualizado: +{_ocs} items, +{_lics} licitaciones")
+                    _cached_load.clear()
+                    st.rerun()
+            except Exception as exc:  # noqa: BLE001
+                st.error(f"Error al actualizar: {exc}")
 
     # ── Welcome banner (sólo primera vez) ──
     _render_welcome_banner()

@@ -715,3 +715,98 @@ def call_deepseek(messages: list[dict], web_context: str, db_context: str,
             return f"Error de conexión: {str(e)}"
 
     return "No se pudo obtener respuesta del servidor de IA tras 3 intentos."
+
+def generate_case_summary(messages: list[dict]) -> str:
+    """Genera un dossier formal resumido de toda la conversacion IA.
+
+    Filtra mensajes del sistema, manda toda la conversacion a DeepSeek con
+    un system prompt especifico que pide un EXPEDIENTE FORENSE estructurado
+    en markdown listo para imprimirse como PDF.
+
+    Retorna texto markdown con secciones formales. Si no hay API key o falla,
+    devuelve un fallback de texto plano armado localmente.
+    """
+    api_key = os.getenv("DEEPSEEK_API_KEY", "")
+
+    # Filtrar mensajes utiles (sin system, sin mensajes-sistema internos)
+    convo = [m for m in messages if m.get("role") in ("user", "assistant")
+             and not (m.get("role") == "assistant" and m.get("content", "").startswith("**Cerebro Forense activado"))]
+
+    if not convo:
+        return "# Expediente vacio\n\nNo hay conversacion para resumir."
+
+    if not api_key:
+        # Fallback: concatenar bruto sin IA
+        out = ["# EXPEDIENTE FORENSE - OJO DEL PUEBLO",
+               f"_Generado el {datetime.now().strftime('%d/%m/%Y %H:%M')}_",
+               "",
+               "## Conversacion completa", ""]
+        for m in convo:
+            who = "INVESTIGADOR" if m["role"] == "user" else "CEREBRO FORENSE"
+            out.append(f"### {who}")
+            out.append(m["content"])
+            out.append("")
+        return "\n".join(out)
+
+    fecha = datetime.now().strftime("%d de %B de %Y, %H:%M")
+    system = (
+        "Eres el redactor jefe del Cerebro Forense de 'Ojo del Pueblo'. "
+        "Recibiras una conversacion completa entre un investigador y la IA forense. "
+        "Tu tarea: producir un EXPEDIENTE FORENSE FORMAL en markdown listo para imprimir como PDF "
+        "de prueba periodistica. Audiencia: periodistas, fiscales, ciudadanos.\n\n"
+        "ESTRUCTURA OBLIGATORIA (usar exactamente estos headers):\n"
+        "# EXPEDIENTE FORENSE - OJO DEL PUEBLO\n"
+        f"_Generado el {fecha}_\n\n"
+        "## 1. RESUMEN EJECUTIVO\n"
+        "(3-5 lineas: que se investigo, que se encontro, nivel de gravedad)\n\n"
+        "## 2. OBJETIVO DE LA INVESTIGACION\n"
+        "(que pregunta inicial planteo el investigador)\n\n"
+        "## 3. HALLAZGOS CLAVE\n"
+        "(bullets con cifras exactas: RUTs, codigos OC, montos en CLP, fechas. "
+        "Cada bullet termina con la fuente citada)\n\n"
+        "## 4. CRUCES Y ANOMALIAS DETECTADAS\n"
+        "(patrones sospechosos, aportes SERVEL, conflictos de interes, abuso TD)\n\n"
+        "## 5. EVIDENCIA DE MERCADO PUBLICO\n"
+        "(datos exactos de la API oficial: codigos OC, organismos, fechas, montos)\n\n"
+        "## 6. FUENTES COMPLEMENTARIAS\n"
+        "(URLs concretas de Dateas, Cooperativa, TodoLicitaciones u otros)\n\n"
+        "## 7. RECOMENDACION DE PROFUNDIZACION\n"
+        "(que linea seguir investigando, que documentos pedir por Transparencia)\n\n"
+        "## 8. APENDICE - TRANSCRIPCION RESUMIDA\n"
+        "(resume cada turno del chat en 2-3 lineas, no transcribas literal)\n\n"
+        "REGLAS:\n"
+        "- Cita SIEMPRE cifras exactas tal como aparecieron en la conversacion. NO inventes datos.\n"
+        "- Si un dato no esta en la conversacion, escribe '(no disponible en la consulta actual)'.\n"
+        "- Tono: profesional, sobrio, basado en evidencia. Sin opinionologia.\n"
+        "- NO uses emojis. NO uses cajas unicode. Markdown plano.\n"
+        "- Largo objetivo: 600-1200 palabras.\n"
+    )
+
+    user_payload = "CONVERSACION A RESUMIR:\n\n"
+    for m in convo:
+        who = "INVESTIGADOR" if m["role"] == "user" else "IA"
+        user_payload += f"--- {who} ---\n{m['content']}\n\n"
+    user_payload += "Genera ahora el EXPEDIENTE FORENSE completo."
+
+    payload = {
+        "model": "deepseek-v4-pro",
+        "messages": [
+            {"role": "system", "content": system},
+            {"role": "user", "content": user_payload},
+        ],
+        "temperature": 0.2,
+    }
+
+    try:
+        response = requests.post(
+            "https://api.deepseek.com/chat/completions",
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            json=payload,
+            timeout=120,
+        )
+        if response.status_code == 200:
+            return response.json()["choices"][0]["message"]["content"]
+        return f"# Error al generar expediente\n\nCodigo HTTP: {response.status_code}"
+    except Exception as exc:  # noqa: BLE001
+        logger.error("Error generate_case_summary: %s", exc)
+        return f"# Error al generar expediente\n\n{type(exc).__name__}: {exc}"

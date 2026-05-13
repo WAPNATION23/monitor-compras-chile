@@ -8,3 +8,4 @@ beautifulsoup4>=4.12,<5
 lxml>=5.1,<7
 openpyxl>=3.1,<4
 duckduckgo-search>=4.0,<9
+reportlab>=4.0,<5

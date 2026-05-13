@@ -31,7 +31,7 @@ from queries import (
 )
 from chat_service import (
     build_db_context, build_web_context, call_deepseek,
-    classify_intent, build_forensic_context,
+    classify_intent, build_forensic_context, generate_case_summary,
 )
 from config import DAILY_QUERY_LIMIT, OC_TIPO_TRATO_DIRECTO, DB_NAME
 from alertas_personas import AlertasPersonas
@@ -2210,7 +2210,214 @@ def _render_tab_ia_impl(df_filtrado, prompt=None):
         unsafe_allow_html=True,
     )
 
+    # ── Generar Caso: dossier PDF de toda la conversación ──
+    # Solo aparece cuando ya hay al menos una pregunta+respuesta del usuario
+    _has_user_msgs = any(m.get("role") == "user" for m in st.session_state.ia_messages)
+    if _has_user_msgs:
+        col_caso, col_clear = st.columns([3, 1])
+        with col_caso:
+            if st.button("📄 Generar Caso (PDF)", key="_btn_generar_caso",
+                          type="primary", use_container_width=True,
+                          help="La IA resume toda la conversación y arma un expediente formal en PDF para compartir o imprimir"):
+                with st.spinner("Compilando expediente forense... (15-30s)"):
+                    summary_md = generate_case_summary(st.session_state.ia_messages)
+                    pdf_bytes = _generate_case_pdf(summary_md)
+                    st.session_state["_caso_pdf_bytes"] = pdf_bytes
+                    st.session_state["_caso_pdf_name"] = f"expediente_ojo_pueblo_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf"
+                    st.session_state["_caso_summary_md"] = summary_md
+                st.success("Expediente listo. Descárgalo abajo o revisa el resumen.")
+        with col_clear:
+            if st.button("🗑 Limpiar chat", key="_btn_clear_chat", use_container_width=True):
+                st.session_state.ia_messages = [st.session_state.ia_messages[0]]
+                st.session_state.ia_tools_used = {}
+                st.session_state.pop("_caso_pdf_bytes", None)
+                st.session_state.pop("_caso_summary_md", None)
+                st.rerun()
+
+        if st.session_state.get("_caso_pdf_bytes"):
+            st.download_button(
+                label="⬇ Descargar expediente PDF",
+                data=st.session_state["_caso_pdf_bytes"],
+                file_name=st.session_state["_caso_pdf_name"],
+                mime="application/pdf",
+                use_container_width=True,
+            )
+            with st.expander("Vista previa del expediente (markdown)", expanded=False):
+                st.markdown(st.session_state.get("_caso_summary_md", ""))
+
     st.caption(f"Consultas restantes hoy: **{remaining}**/{daily_limit}")
+
+
+def _generate_case_pdf(summary_md: str) -> bytes:
+    """Convierte el markdown del expediente a PDF (reportlab).
+
+    No interpreta markdown completo: detecta headers (#, ##, ###) y los renderiza
+    como títulos. El resto va como párrafos normales. Listas con '- ' se renderizan
+    como bullets.
+    """
+    from io import BytesIO
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.units import cm
+    from reportlab.lib.colors import HexColor
+    from reportlab.platypus import (
+        SimpleDocTemplate, Paragraph, Spacer, PageBreak,
+    )
+
+    buf = BytesIO()
+    doc = SimpleDocTemplate(
+        buf, pagesize=A4,
+        leftMargin=2*cm, rightMargin=2*cm,
+        topMargin=2*cm, bottomMargin=2*cm,
+        title="Expediente Forense - Ojo del Pueblo",
+        author="Ojo del Pueblo",
+    )
+
+    styles = getSampleStyleSheet()
+    style_h1 = ParagraphStyle(
+        "H1", parent=styles["Heading1"],
+        fontSize=18, textColor=HexColor("#0b1e3f"),
+        spaceAfter=12, spaceBefore=6,
+    )
+    style_h2 = ParagraphStyle(
+        "H2", parent=styles["Heading2"],
+        fontSize=14, textColor=HexColor("#1e3a8a"),
+        spaceAfter=8, spaceBefore=12,
+    )
+    style_h3 = ParagraphStyle(
+        "H3", parent=styles["Heading3"],
+        fontSize=11, textColor=HexColor("#2563eb"),
+        spaceAfter=6, spaceBefore=8,
+    )
+    style_body = ParagraphStyle(
+        "Body", parent=styles["BodyText"],
+        fontSize=10, leading=14,
+        textColor=HexColor("#1f2937"),
+        spaceAfter=4,
+    )
+    style_bullet = ParagraphStyle(
+        "Bullet", parent=style_body,
+        leftIndent=14, bulletIndent=4,
+    )
+    style_meta = ParagraphStyle(
+        "Meta", parent=style_body,
+        fontSize=9, textColor=HexColor("#64748b"),
+        italic=True, spaceAfter=12,
+    )
+
+    def _md_inline(text: str) -> str:
+        # **bold** -> <b>...</b>, _italic_ -> <i>...</i>
+        text = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", text)
+        text = re.sub(r"(?<!\w)_(.+?)_(?!\w)", r"<i>\1</i>", text)
+        # Escapar < y > que no sean tags conocidos (b/i/br)
+        text = re.sub(r"<(?!/?(?:b|i|br)\b)", "&lt;", text)
+        return text
+
+    story = []
+    for raw_line in summary_md.splitlines():
+        line = raw_line.rstrip()
+        if not line.strip():
+            story.append(Spacer(1, 4))
+            continue
+        if line.startswith("# "):
+            story.append(Paragraph(_md_inline(line[2:].strip()), style_h1))
+        elif line.startswith("## "):
+            story.append(Paragraph(_md_inline(line[3:].strip()), style_h2))
+        elif line.startswith("### "):
+            story.append(Paragraph(_md_inline(line[4:].strip()), style_h3))
+        elif line.lstrip().startswith(("- ", "* ")):
+            bullet_text = line.lstrip()[2:].strip()
+            story.append(Paragraph(f"• {_md_inline(bullet_text)}", style_bullet))
+        elif line.startswith("_") and line.endswith("_") and len(line) > 2:
+            story.append(Paragraph(_md_inline(line), style_meta))
+        else:
+            story.append(Paragraph(_md_inline(line), style_body))
+
+    # Footer legal
+    story.append(Spacer(1, 16))
+    story.append(Paragraph(
+        "<i>Este expediente fue generado automáticamente por la plataforma "
+        "<b>Ojo del Pueblo</b> (monitor.wapnation.cl) a partir de datos públicos "
+        "de Mercado Público, SERVEL y otras fuentes oficiales del Estado de Chile. "
+        "No constituye prueba judicial. Verifica los datos en sus fuentes originales "
+        "antes de citarlos públicamente.</i>",
+        style_meta,
+    ))
+
+    doc.build(story)
+    return buf.getvalue()
+
+
+def _render_welcome_banner() -> None:
+    """Banner de bienvenida con 3 búsquedas-ejemplo clickeables.
+
+    Solo se muestra si el usuario NO ha disparado ninguna investigación todavía
+    (no hay ia_messages con role=user y no hay _pending_query). Una vez que el
+    usuario interactúa, el banner desaparece para no robar espacio.
+    """
+    _ia_msgs = st.session_state.get("ia_messages", [])
+    _has_interacted = any(m.get("role") == "user" for m in _ia_msgs)
+    if _has_interacted or st.session_state.get("_welcome_dismissed"):
+        return
+
+    st.markdown(
+        """
+        <div style="background: linear-gradient(135deg, #0b1e3f 0%, #102a52 50%, #1e3a8a 100%);
+                    border: 1px solid rgba(96,165,250,0.35);
+                    border-left: 5px solid #60a5fa;
+                    border-radius: 14px;
+                    padding: 20px 26px;
+                    margin: 14px 0 18px 0;
+                    box-shadow: 0 6px 20px rgba(37,99,235,0.18);">
+          <div style="display:flex; align-items:center; gap:12px; margin-bottom:8px;">
+            <span style="font-size:1.6rem;">🧠</span>
+            <div>
+              <div style="color:#F1F5F9; font-size:1.1rem; font-weight:700; letter-spacing:-0.01em;">
+                Cerebro Forense listo para investigar
+              </div>
+              <div style="color:#94A3B8; font-size:0.82rem;">
+                Pregunta lo que sea en español. Tengo acceso a 11 fuentes oficiales.
+                Prueba con uno de estos casos reales:
+              </div>
+            </div>
+          </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    _EXAMPLES = [
+        ("🏛 Trato Directo abusivo",
+         "¿Qué municipalidades abusan del trato directo? Dame los 5 organismos con peor ratio y montos involucrados."),
+        ("💰 SERVEL → Licitaciones",
+         "¿Hay aportantes a campañas electorales del SERVEL que después ganan licitaciones públicas? Dame casos concretos con RUT y montos."),
+        ("📊 Top sospechosos",
+         "Dame el ranking de los 10 proveedores más sospechosos de la base de datos completa, con score de riesgo y patrones detectados."),
+    ]
+
+    cols = st.columns(len(_EXAMPLES))
+    for i, (label, query) in enumerate(_EXAMPLES):
+        with cols[i]:
+            if st.button(label, key=f"_welcome_ex_{i}",
+                          use_container_width=True, type="secondary"):
+                st.session_state["_pending_query"] = query
+                st.rerun()
+
+    col_dismiss, _ = st.columns([1, 5])
+    with col_dismiss:
+        if st.button("Ocultar bienvenida", key="_welcome_dismiss_btn"):
+            st.session_state["_welcome_dismissed"] = True
+            st.rerun()
+    st.markdown("<div style='margin-bottom:10px;'></div>", unsafe_allow_html=True)
+
+
+# ── Atajos forenses pre-armados para el sidebar ──
+_QUICK_FILTERS = {
+    "Solo Trato Directo": {"tipo": ["TD"]},
+    "Compras > 100M CLP": {"monto_min": 100_000_000},
+    "TD millonarios": {"tipo": ["TD"], "monto_min": 100_000_000},
+    "Resetear filtros": {"reset": True},
+}
 
 
 def _render_tab_servel(df_filtrado: pd.DataFrame):
@@ -2447,6 +2654,70 @@ def _render_tab_servel(df_filtrado: pd.DataFrame):
 
 
 def main():
+    # ─────────────────────────────────────────────────────────────────────
+    # QUERY PARAMS — URLs compartibles (?rut=...&q=...&tab=...)
+    # ─────────────────────────────────────────────────────────────────────
+    # ?rut=76123456-7         → auto-llena el filtro global
+    # ?q=texto                → auto-llena el filtro global (alias de rut)
+    # ?ia=pregunta            → dispara una investigación IA al cargar
+    # ?tab=Asistente+IA       → abre directo esa pestaña
+    try:
+        _qp = st.query_params
+        _qp_rut = (_qp.get("rut") or "").strip()
+        _qp_q = (_qp.get("q") or "").strip()
+        _qp_ia = (_qp.get("ia") or "").strip()
+        _qp_tab = (_qp.get("tab") or "").strip()
+    except Exception:  # noqa: BLE001
+        _qp_rut = _qp_q = _qp_ia = _qp_tab = ""
+
+    # Aplicar autoload SOLO la primera vez (para no pisar cambios manuales luego)
+    if "_qp_applied" not in st.session_state:
+        st.session_state["_qp_applied"] = True
+        if _qp_rut or _qp_q:
+            st.session_state["filtro_global"] = _qp_rut or _qp_q
+        if _qp_ia:
+            st.session_state["_pending_query"] = _qp_ia
+            st.session_state["_welcome_dismissed"] = True
+        if _qp_tab:
+            st.session_state["_initial_tab"] = _qp_tab
+
+    # ─────────────────────────────────────────────────────────────────────
+    # CSS RESPONSIVE (mobile-first quick wins)
+    # ─────────────────────────────────────────────────────────────────────
+    st.markdown(
+        """
+        <style>
+        /* Tabs scrollables horizontalmente en mobile */
+        div[role='radiogroup'] {
+            overflow-x: auto !important;
+            flex-wrap: nowrap !important;
+            scrollbar-width: thin;
+            -webkit-overflow-scrolling: touch;
+        }
+        div[role='radiogroup']::-webkit-scrollbar { height: 4px; }
+        div[role='radiogroup'] > label {
+            white-space: nowrap !important;
+            flex-shrink: 0 !important;
+        }
+        @media (max-width: 768px) {
+            .block-container {
+                padding-left: 0.6rem !important;
+                padding-right: 0.6rem !important;
+                padding-top: 1rem !important;
+            }
+            h1 { font-size: 1.5rem !important; }
+            h3 { font-size: 1rem !important; }
+            [data-testid="stMetricValue"] { font-size: 1.1rem !important; }
+            [data-testid="stMetricLabel"] { font-size: 0.62rem !important; }
+            div[data-testid="metric-container"] { padding: 10px 8px !important; }
+            .chat-bubble { max-width: 92% !important; font-size: 0.85rem !important; }
+            .source-card { padding: 14px !important; }
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
     # ENCABEZADO PRINCIPAL
     col_t1, col_t2, col_t3 = st.columns([0.06, 0.64, 0.3])
     with col_t1:
@@ -2577,6 +2848,40 @@ def main():
 
         st.markdown("<div style='margin:12px 0; border-top:1px solid rgba(51,65,85,0.3);'></div>", unsafe_allow_html=True)
 
+        # ── Atajos forenses pre-armados ──
+        st.markdown(
+            "<p style='color:#475569; font-size:0.7rem; text-transform:uppercase; "
+            "letter-spacing:0.08em; font-weight:600; margin-bottom:4px;'>Atajos forenses</p>",
+            unsafe_allow_html=True,
+        )
+        col_a1, col_a2 = st.columns(2)
+        with col_a1:
+            if st.button("🔻 Solo Trato Directo", key="qf_td", use_container_width=True):
+                st.session_state["_quick_filter"] = "td_only"
+                st.rerun()
+            if st.button("💣 TD millonarios", key="qf_td_big", use_container_width=True,
+                          help="Trato directo > 100M CLP"):
+                st.session_state["_quick_filter"] = "td_big"
+                st.rerun()
+        with col_a2:
+            if st.button("💰 > 100M CLP", key="qf_100m", use_container_width=True):
+                st.session_state["_quick_filter"] = "big_money"
+                st.rerun()
+            if st.button("♻ Reset filtros", key="qf_reset", use_container_width=True):
+                for k in ("filtro_global", "_quick_filter"):
+                    st.session_state.pop(k, None)
+                st.rerun()
+
+    # ── Aplicar atajo forense si está activo ──
+    _qf = st.session_state.get("_quick_filter")
+    if _qf == "td_only":
+        filtro_tipo = list({*filtro_tipo, "TD"})
+    elif _qf == "big_money":
+        filtro_monto_min = max(filtro_monto_min, 100_000_000)
+    elif _qf == "td_big":
+        filtro_tipo = list({*filtro_tipo, "TD"})
+        filtro_monto_min = max(filtro_monto_min, 100_000_000)
+
     # APLICAR FILTROS
     df_filtrado = df.copy()
 
@@ -2633,6 +2938,37 @@ def main():
         n_trato_directo = df_filtrado[df_filtrado['tipo_oc'].isin(OC_TIPO_TRATO_DIRECTO)]['codigo_oc'].nunique()
     pct_td = (n_trato_directo / total_oc * 100) if total_oc > 0 else 0
 
+    # ── Contador de resultados vivo en el sidebar ──
+    _total_df = len(df)
+    _total_filtrado = len(df_filtrado)
+    _is_filtered = _total_filtrado < _total_df
+    with st.sidebar:
+        _pct = (_total_filtrado / _total_df * 100) if _total_df else 0
+        _color = "#10B981" if not _is_filtered else ("#FBBF24" if _total_filtrado > 0 else "#EF4444")
+        st.markdown(
+            f"""
+            <div style="background: rgba(15,23,42,0.6);
+                        border: 1px solid rgba(51,65,85,0.4);
+                        border-left: 3px solid {_color};
+                        border-radius: 10px;
+                        padding: 10px 14px; margin-top: 4px;">
+              <div style="color:#94A3B8; font-size:0.68rem; text-transform:uppercase;
+                          letter-spacing:0.06em;">Resultados</div>
+              <div style="color:#F1F5F9; font-size:1.05rem; font-weight:700; margin-top:2px;">
+                {_total_filtrado:,} <span style="color:#64748B; font-size:0.78rem; font-weight:500;">
+                de {_total_df:,}</span>
+              </div>
+              <div style="color:#64748B; font-size:0.7rem; margin-top:2px;">
+                {_pct:.1f}% del total · {total_oc:,} OC únicas
+              </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+    # ── Welcome banner (sólo primera vez) ──
+    _render_welcome_banner()
+
     # ─────────────────────────────────────────────────────────────────────────
     # ENRUTAMIENTO POR PESTAÑAS (Limpieza Visual)
     # ─────────────────────────────────────────────────────────────────────────
@@ -2647,6 +2983,26 @@ def main():
         "Denuncias",
         "Asistente IA",
     ]
+
+    # ── Badges en labels: cuenta alertas activas con el filtro actual ──
+    # Solo aplicamos badges a las tabs más sensibles para no saturar.
+    _n_alertas_td_grandes = 0
+    if not df_filtrado.empty:
+        _df_td = df_filtrado[df_filtrado['tipo_oc'].isin(OC_TIPO_TRATO_DIRECTO)]
+        if not _df_td.empty:
+            _montos_td = _df_td.groupby('codigo_oc')['monto_total_item'].sum()
+            _n_alertas_td_grandes = (_montos_td >= 50_000_000).sum()
+
+    _badged = []
+    for _name in tab_names:
+        if _name == "Cruces Forenses" and _n_alertas_td_grandes > 0:
+            _badged.append(f"Cruces Forenses 🔴 {_n_alertas_td_grandes}")
+        elif _name == "Asistente IA":
+            _badged.append("🧠 Asistente IA")
+        else:
+            _badged.append(_name)
+    _tabname_to_badged = dict(zip(tab_names, _badged))
+    _badged_to_tabname = dict(zip(_badged, tab_names))
 
     # ─────────────────────────────────────────────────────────────────────
     # ESTRATEGIA DE RENDERIZADO EN 2 MODOS
@@ -2729,8 +3085,17 @@ def main():
         </style>""",
         unsafe_allow_html=True
     )
-    
-    active_tab = st.radio("Módulos", tab_names, horizontal=True, label_visibility="collapsed")
+
+    # Soporte para tab inicial vía ?tab=... o vía atajo de IA
+    _initial_tab = st.session_state.pop("_initial_tab", None)
+    _radio_index = 0
+    if _initial_tab and _initial_tab in tab_names:
+        _radio_index = tab_names.index(_initial_tab)
+    active_tab_badged = st.radio(
+        "Módulos", _badged, horizontal=True,
+        label_visibility="collapsed", index=_radio_index,
+    )
+    active_tab = _badged_to_tabname.get(active_tab_badged, active_tab_badged)
 
     st.markdown("<div style='margin-bottom:16px;'></div>", unsafe_allow_html=True)
 

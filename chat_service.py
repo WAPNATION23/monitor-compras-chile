@@ -18,7 +18,7 @@ from datetime import datetime
 import requests
 from dotenv import load_dotenv
 
-from config import API_OC_URL, DB_NAME, REQUEST_TIMEOUT
+from config import API_BUSCAR_PROVEEDOR_URL, API_OC_URL, DB_NAME, REQUEST_TIMEOUT
 
 logger = logging.getLogger(__name__)
 
@@ -313,17 +313,71 @@ def _extract_keywords(text: str) -> list[str]:
     ][:10]
 
 
+def _format_rut_with_dots(rut: str) -> str:
+    """Convierte '76111222-3' -> '76.111.222-3' (formato esperado por API MP).
+
+    Si el RUT ya viene con puntos, lo devuelve normalizado.
+    """
+    clean = rut.replace(".", "").replace(" ", "").strip()
+    if "-" not in clean:
+        return rut  # no podemos formatear sin DV
+    body, dv = clean.rsplit("-", 1)
+    # invertir, agrupar de a 3, reinvertir
+    body_rev = body[::-1]
+    chunks = [body_rev[i:i + 3] for i in range(0, len(body_rev), 3)]
+    body_fmt = ".".join(chunks)[::-1]
+    return f"{body_fmt}-{dv.upper()}"
+
+
 def build_db_context(prompt: str) -> str:
-    """Busca en la DB local y en la API de Mercado Público para armar contexto."""
+    """Busca en la DB local y en la API de Mercado Público para armar contexto.
+
+    Mercado Público es la fuente PRIMARIA y se consulta primero:
+      1. Si hay RUT -> BuscarProveedor (autoritativo, datos de la empresa)
+      2. Si hay match en BD -> detalle de la OC top via API
+    Después se complementa con BD local (organismos, totales, etc.).
+    """
     db_context = ""
-    
+
     # 1. Prioridad: Buscar por RUT exacto si viene en el prompt
     m_rut = re.search(r"RUT\s+([\d\.\-Kk]+)", prompt, re.IGNORECASE)
     rut_detected = m_rut.group(1).replace(".", "").strip() if m_rut else None
 
+    # Si no hay 'RUT' literal pero hay un patrón 7-9 dígitos+DV, también lo capturamos
+    if not rut_detected:
+        m_rut2 = re.search(r"\b(\d{1,2}\.?\d{3}\.?\d{3}-[\dKk])\b", prompt)
+        if m_rut2:
+            rut_detected = m_rut2.group(1).replace(".", "").strip()
+
     palabras = _extract_keywords(prompt)
     if not palabras and not rut_detected:
         return db_context
+
+    # ── PASO 0: Consulta directa al endpoint oficial BuscarProveedor si hay RUT ──
+    mp_ticket = os.getenv("MERCADO_PUBLICO_TICKET", "")
+    if rut_detected and mp_ticket:
+        try:
+            # El endpoint espera RUT con puntos y guion: 76.111.222-3
+            rut_fmt = _format_rut_with_dots(rut_detected)
+            r = requests.get(
+                API_BUSCAR_PROVEEDOR_URL,
+                params={"rutempresaproveedor": rut_fmt, "ticket": mp_ticket},
+                timeout=REQUEST_TIMEOUT,
+            )
+            if r.status_code == 200:
+                data = r.json()
+                listado = data.get("listaEmpresas") or data.get("Listado") or []
+                if listado:
+                    emp = listado[0] if isinstance(listado, list) else listado
+                    db_context += (
+                        "\n### MERCADO PUBLICO - FUENTE PRIMARIA OFICIAL (BuscarProveedor):\n"
+                        f"- RUT consultado: {rut_fmt}\n"
+                        f"- Nombre empresa: {emp.get('NombreEmpresa', 'N/A')}\n"
+                        f"- Codigo interno MP: {emp.get('CodigoEmpresa', 'N/A')}\n"
+                        f"- Estado: Registrado en plataforma oficial de compras del Estado.\n"
+                    )
+        except (requests.RequestException, ValueError, KeyError) as exc:
+            logger.warning("Error en API BuscarProveedor para %s: %s", rut_detected, exc)
 
     try:
         with sqlite3.connect(DB_PATH) as conn:
@@ -569,36 +623,45 @@ def build_system_prompt(web_context: str, db_context: str,
         "======================================\n"
         f"{forensic_context}\n"
         "\n======================================\n"
-        "== BASE DE DATOS LOCAL (Ordenes de Compra) ==\n"
+        "== MERCADO PUBLICO + BD LOCAL (FUENTE PRIMARIA OFICIAL) ==\n"
         "======================================\n"
+        "Esta seccion contiene datos cruzados de la API oficial de Mercado Publico "
+        "(api.mercadopublico.cl) y la base de datos local con 54.000+ ordenes de "
+        "compra extraidas de esa misma API. Es la EVIDENCIA PRIMARIA del expediente.\n"
         f"{db_context}\n"
         "\n======================================\n"
-        "== CONTEXTO WEB OSINT (11 Fuentes en Tiempo Real) ==\n"
+        "== CONTEXTO WEB OSINT (Fuentes complementarias en tiempo real) ==\n"
         "======================================\n"
-        "Fuentes web consultadas: Dateas.com (publicaciones legales, Diario Oficial), "
+        "Fuentes web consultadas (complementarias, NUNCA reemplazan a Mercado Publico): "
+        "Dateas.com (publicaciones legales, Diario Oficial), "
         "Cooperativa.cl (avisos legales, perdida de cheques, quiebras), "
         "TodoLicitaciones / LicitaPyme / ChilePyme (licitaciones publicas), "
         "CIPER / BioBioChile / interferencia.cl (periodismo investigativo), "
-        "ademas de las 7 fuentes oficiales (SERVEL, InfoLobby, Contraloria, "
-        "InfoProbidad, Mercado Publico, datos.gob.cl, CGR SICA).\n\n"
+        "ademas de las otras 6 fuentes oficiales (SERVEL, InfoLobby, Contraloria, "
+        "InfoProbidad, datos.gob.cl, CGR SICA).\n\n"
         f"{web_context}\n"
         "\n##############################################################\n"
         "DIRECTRICES (OBLIGATORIO):\n"
         "1. Habla como un analista entregando un expediente clasificado. Cero frases genericas.\n"
-        "2. Usa TODAS las fuentes disponibles como evidencia. Las fuentes web OSINT "
-        "(Dateas, Cooperativa avisos legales, portales de licitaciones) son TAN importantes "
-        "como las fuentes oficiales. Si Dateas muestra una publicacion legal (perdida de "
-        "cheques, quiebra, constitucion de sociedad), CITALA con URL.\n"
-        "3. Estructura la respuesta asi:\n"
+        "2. FUENTE PRIMARIA = MERCADO PUBLICO + BD LOCAL. Empieza SIEMPRE el expediente "
+        "citando datos exactos de Mercado Publico (codigos OC, RUTs, montos en CLP, "
+        "fechas, organismos compradores). El resto de las fuentes son COMPLEMENTARIAS.\n"
+        "3. Usa las fuentes web OSINT (Dateas, Cooperativa avisos legales, portales de "
+        "licitaciones) como EVIDENCIA SECUNDARIA. Si encuentras un aviso legal "
+        "(perdida de cheques, quiebra, constitucion de sociedad), CITALA con URL "
+        "pero subordinada al historial de Mercado Publico.\n"
+        "4. Estructura la respuesta asi:\n"
         "   - **PERFIL DE INTERES:** (Quien es, RUT, cargo, vinculos)\n"
-        "   - **HISTORIAL FINANCIERO:** (Contratos, montos, fechas, tipo de compra, concentracion)\n"
+        "   - **HISTORIAL EN MERCADO PUBLICO:** (Contratos, montos, fechas, tipo de compra, "
+        "concentracion por organismo) - usa datos de la seccion FUENTE PRIMARIA\n"
         "   - **ALERTAS Y ANOMALIAS:** (Score de riesgo, patrones sospechosos, cruces SERVEL, conflictos de interes)\n"
         "   - **REGISTROS LEGALES/JUDICIALES:** (Publicaciones en Diario Oficial, avisos legales, "
         "perdida de documentos, quiebras, constituciones de sociedades — de Dateas y Cooperativa)\n"
         "   - **PRESENCIA EN LICITACIONES:** (Apariciones en TodoLicitaciones, LicitaPyme, ChilePyme)\n"
         "   - **RECOMENDACION DE INVESTIGACION:** (Que profundizar, que fuentes consultar)\n"
-        "4. Cita datos exactos: codigos OC, RUTs, montos, fechas, scores de riesgo, URLs.\n"
-        "5. Si NO encuentras datos del objetivo, dilo y sugiere busquedas alternativas.\n"
+        "5. Cita datos exactos: codigos OC, RUTs, montos, fechas, scores de riesgo, URLs.\n"
+        "6. Si NO encuentras datos del objetivo en Mercado Publico, dilo explicitamente "
+        "y sugiere busquedas alternativas. La ausencia tambien es informacion.\n"
         "6. [HERRAMIENTA AUTONOMA — INFILTRACION] Si detectas un RUT (ej. '76.111.222-3'), "
         "puedes ordenar descargar su historial completo anadiendo al final de tu respuesta: "
         "`[EJECUTAR_INFILTRACION: 76.111.222-3]`\n"

@@ -395,19 +395,74 @@ def build_db_context(prompt: str) -> str:
                     (rut_detected,)
                 ).fetchall()
             else:
-                params = [f"%{p}%" for p in palabras[:5]]
-                conditions = " AND ".join(["nombre_proveedor LIKE ?" for _ in params])
-                rows = conn.execute(
-                    f"""
-                    SELECT codigo_oc, nombre_proveedor, monto_total_item, nombre_comprador,
-                           tipo_oc, categoria, fecha_creacion, rut_proveedor
-                    FROM ordenes_items
-                    WHERE {conditions}
-                    ORDER BY monto_total_item DESC
-                    LIMIT 10
-                    """,
-                    params,
-                ).fetchall()
+                # Busqueda por nombre: estrategia escalonada.
+                # 1) Todas las palabras AND (estricto)  2) Top-2 keywords AND
+                # 3) Keyword mas distintiva sola. Se queda con lo primero que devuelva algo.
+                # Esto evita fallar cuando el usuario agrega contexto (ej. "antofagasta")
+                # que no esta literal en el nombre del proveedor.
+                rows = []
+                # Generic / low-signal terms (industry verticals, paises, palabras vacias)
+                _GENERIC = {
+                    "empresa", "empresas", "compania", "compañia", "sociedad",
+                    "chile", "ltda", "spa", "limitada", "sa", "eirl",
+                    "transportes", "transporte", "comercial", "servicios",
+                    "constructora", "constructor", "consultora", "consultores",
+                    "inversiones", "inmobiliaria", "ingenieria", "ingenieros",
+                    "distribuidora", "distribuidor", "importadora", "importaciones",
+                    "exportadora", "comercio",
+                }
+                # Ciudades / regiones chilenas (alta frecuencia, baja distintividad)
+                _GEO = {
+                    "antofagasta", "santiago", "valparaiso", "valparaíso",
+                    "concepcion", "concepción", "temuco", "iquique", "arica",
+                    "rancagua", "talca", "chillan", "chillán", "punta", "arenas",
+                    "puerto", "montt", "calama", "copiapo", "copiapó",
+                    "coquimbo", "serena", "ovalle", "linares", "curico", "curicó",
+                    "osorno", "valdivia", "talcahuano", "viña", "vina", "del", "mar",
+                    "region", "región", "ciudad", "comuna", "norte", "sur",
+                }
+                # Score: largo + bonus si parece nombre propio (no esta en listas).
+                # Penaliza palabras genericas o geograficas comunes.
+                def _score(w: str) -> tuple[int, int]:
+                    wl = w.lower()
+                    if wl in _GENERIC:
+                        return (-2, -len(w))  # casi descartado
+                    if wl in _GEO:
+                        return (-1, -len(w))  # solo si no hay nada mejor
+                    return (1, len(w))  # priorizada
+
+                keywords_sorted = sorted(set(palabras), key=_score, reverse=True)
+                kws_useful = [k for k in keywords_sorted if _score(k)[0] >= 1]
+                strategies: list[list[str]] = []
+                if kws_useful:
+                    if len(kws_useful) >= 2:
+                        strategies.append(kws_useful[:3])      # 2-3 distintivas AND
+                    strategies.append([kws_useful[0]])         # la mas distintiva sola
+                # Fallback: si no hay nada distintivo, intenta con todas las palabras
+                if not strategies and palabras:
+                    strategies.append(palabras[:3])
+
+                seen_strategies: set[tuple[str, ...]] = set()
+                for strat in strategies:
+                    key = tuple(strat)
+                    if key in seen_strategies or not strat:
+                        continue
+                    seen_strategies.add(key)
+                    params = [f"%{p}%" for p in strat]
+                    cond_prov = " AND ".join(["nombre_proveedor LIKE ?" for _ in params])
+                    rows = conn.execute(
+                        f"""
+                        SELECT codigo_oc, nombre_proveedor, monto_total_item, nombre_comprador,
+                               tipo_oc, categoria, fecha_creacion, rut_proveedor
+                        FROM ordenes_items
+                        WHERE {cond_prov}
+                        ORDER BY monto_total_item DESC
+                        LIMIT 10
+                        """,
+                        params,
+                    ).fetchall()
+                    if rows:
+                        break
 
             if rows:
                 db_context += f"\n### DATOS ENCONTRADOS EN BASE DE DATOS LOCAL ({len(rows)} resultados):\n"
@@ -493,6 +548,27 @@ def build_web_context(prompt: str) -> str:
 
     # Define targeted search queries for each OSINT source cluster
     _OSINT_QUERIES = [
+        # 0. Busqueda generica amplia (descubrimiento de RUT, web, redes)
+        {
+            "query": f"{search_term} chile rut",
+            "label": "Busqueda general (descubrimiento de RUT y presencia web)",
+            "max_results": 6,
+        },
+        # 0.1 Portal oficial de proveedores (Mercado Publico)
+        {
+            "query": f"{search_term} site:mercadopublico.cl OR site:chilecompra.cl",
+            "label": "Mercado Publico / ChileCompra (proveedor oficial)",
+            "max_results": 4,
+        },
+        # 0.2 Directorios de empresas chilenas (suelen traer RUT + giro + direccion)
+        {
+            "query": (
+                f"{search_term} site:guiaempresaschile.cl OR site:rut.cl OR "
+                "site:empresascl.com OR site:nuestrarut.cl OR site:datos.gob.cl"
+            ),
+            "label": "Directorios de empresas (RUT, giro, direccion)",
+            "max_results": 5,
+        },
         # 1. Fuentes judiciales / legales / Diario Oficial
         {
             "query": f"site:dateas.com {search_term} chile",
@@ -514,8 +590,17 @@ def build_web_context(prompt: str) -> str:
         # 4. Contexto periodístico / corrupción / contraloría
         {
             "query": f"{search_term} chile corrupcion OR contraloria OR fundaciones OR licitacion OR fraude",
-            "label": "Fuentes periodísticas y judiciales",
+            "label": "Fuentes periodisticas y judiciales",
             "max_results": 5,
+        },
+        # 5. Prensa regional (cubre denuncias locales que no llegan a medios nacionales)
+        {
+            "query": (
+                f"{search_term} site:soychile.cl OR site:elnortero.cl OR "
+                "site:laprensaaustral.cl OR site:elmostrador.cl OR site:diarioantofagasta.cl"
+            ),
+            "label": "Prensa regional chilena",
+            "max_results": 4,
         },
     ]
 
@@ -682,6 +767,28 @@ def build_system_prompt(web_context: str, db_context: str,
         "coincidencias parciales del contexto (mismo organismo, misma region, mismo cargo).\n"
         "   f) Una vez que tengas o propongas un RUT, ejecuta automaticamente la "
         "infiltracion con `[EJECUTAR_INFILTRACION: <rut>]` para traer su historial.\n"
+        "6.2. [BUSQUEDA DE EMPRESA POR NOMBRE — OBLIGATORIO] Si el usuario te da "
+        "el nombre de una empresa SIN RUT (ej. 'Transportes Mathias de Antofagasta'), "
+        "NO digas 'no la encuentro'. Despliega el siguiente protocolo:\n"
+        "   a) Mira los DIRECTORIOS DE EMPRESAS del contexto web (guiaempresaschile, "
+        "rut.cl, empresascl, nuestrarut, datos.gob.cl) — alli aparece RUT + giro + "
+        "direccion.\n"
+        "   b) Mira la seccion MERCADO PUBLICO / CHILECOMPRA del contexto web — si "
+        "la empresa vende al Estado, su RUT esta publicado ahi.\n"
+        "   c) Mira los DATOS DE BD LOCAL: ya se hicieron busquedas escalonadas por "
+        "nombre (todas las palabras, top-2, palabra mas distintiva). Si hay match "
+        "parcial, repotalo aunque la coincidencia no sea exacta.\n"
+        "   d) Mira la PRENSA REGIONAL: en una empresa de Antofagasta, El Nortero o "
+        "Diario Antofagasta suelen tener historicos.\n"
+        "   e) Considera VARIANTES ortograficas del nombre (Mathias / Matias / "
+        "Mathiass / Matias S.A. / Transportes M. ...) y razona sobre cual es la "
+        "version oficial registrada en SII / Mercado Publico.\n"
+        "   f) Aun si NO encuentras nada concreto, entrega un INFORME DE BUSQUEDA: "
+        "que fuentes revisaste, que variantes intentaste, y que pistas hay (region, "
+        "rubro probable, tamano probable, nombre similar de otra empresa del rubro). "
+        "Decirle al usuario 'busca mas datos' SIN haberte exprimido tu razonamiento "
+        "esta PROHIBIDO.\n"
+        "   g) Si llegas a un RUT candidato, dispara `[EJECUTAR_INFILTRACION: <rut>]`.\n"
         "7. [HERRAMIENTA AUTONOMA — INFILTRACION] Si detectas un RUT (ej. '76.111.222-3'), "
         "puedes ordenar descargar su historial completo anadiendo al final de tu respuesta: "
         "`[EJECUTAR_INFILTRACION: 76.111.222-3]`\n"

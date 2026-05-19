@@ -186,18 +186,40 @@ def _tool_anomaly_scan(prompt: str) -> tuple[str, str]:
                     f"Monto: ${row.get('monto_total', 0):,.0f} CLP"
                 )
 
-        # Abuso de trato directo (cacheado)
+        # Abuso de trato directo (cacheado) — filtrado por significancia estadistica
         df_td = _cached_ratio_td()
         if not df_td.empty:
-            top_td = df_td[df_td["ratio_td"] > 80].head(5)
-            if not top_td.empty:
-                lines.append("\n**ORGANISMOS CON >80% TRATO DIRECTO:**")
-                for _, row in top_td.iterrows():
+            # Solo organismos con volumen significativo (>=10 OC) para evitar ruido 1/1
+            df_td_sig = df_td[df_td["n_total"] >= 10].copy()
+
+            # Top 10 GLOBAL por ratio_td (organismos relevantes)
+            top_td_global = df_td_sig.sort_values("ratio_td", ascending=False).head(10)
+            if not top_td_global.empty:
+                lines.append("\n**TOP 10 ORGANISMOS CON MAYOR RATIO DE TRATO DIRECTO (N>=10 OC):**")
+                for _, row in top_td_global.iterrows():
+                    monto_td = row.get('monto_td', 0) or 0
                     lines.append(
-                        f"- {row.get('nombre_comprador', '?')} | "
-                        f"TD: {row.get('ratio_td', 0):.0f}% | "
-                        f"N={row.get('n_trato_directo', 0)}/{row.get('n_total', 0)}"
+                        f"- {row.get('nombre_comprador', '?')} (RUT {row.get('rut_comprador', '?')}) | "
+                        f"TD: {row.get('ratio_td', 0):.0f}% ({row.get('n_trato_directo', 0)}/{row.get('n_total', 0)} OC) | "
+                        f"Monto TD: ${monto_td:,.0f} CLP ({row.get('pct_monto_td', 0):.0f}% del total)"
                     )
+
+            # Top 10 MUNICIPALIDADES por ratio_td (filtro por nombre)
+            mask_muni = df_td_sig["nombre_comprador"].astype(str).str.lower().str.contains(
+                r"municipal|i\. muni|ilustre muni", regex=True, na=False
+            )
+            top_td_muni = df_td_sig[mask_muni].sort_values("ratio_td", ascending=False).head(10)
+            if not top_td_muni.empty:
+                lines.append("\n**TOP 10 MUNICIPALIDADES POR RATIO DE TRATO DIRECTO (N>=10 OC):**")
+                for _, row in top_td_muni.iterrows():
+                    monto_td = row.get('monto_td', 0) or 0
+                    lines.append(
+                        f"- {row.get('nombre_comprador', '?')} (RUT {row.get('rut_comprador', '?')}) | "
+                        f"TD: {row.get('ratio_td', 0):.0f}% ({row.get('n_trato_directo', 0)}/{row.get('n_total', 0)} OC) | "
+                        f"Monto TD: ${monto_td:,.0f} CLP"
+                    )
+            else:
+                lines.append("\n**MUNICIPALIDADES:** Sin municipalidades con >=10 OC en la BD actual (la cobertura puede ser parcial — la BD prioriza grandes compradores).")
 
         return "Scanner Forense", "\n".join(lines)
     except Exception as exc:
@@ -893,6 +915,30 @@ def build_system_prompt(web_context: str, db_context: str,
         "investigable aunque NO licite con el Estado. Si Mercado Publico no la tiene, "
         "NO concluyas 'no existe' — busca en directorios (rut.cl, guiaempresaschile), "
         "prensa regional, redes. Mercado Publico es solo UNA de varias fuentes.\n"
+        "10. [PROHIBIDO PEDIR PERMISO — INVESTIGA PRIMERO, PREGUNTA DESPUES] NUNCA "
+        "termines tu respuesta con frases tipo 'indiqueme si desea que proceda', "
+        "'desea que profundice', 'puedo ejecutar si me autoriza'. ESTAS PROHIBIDAS. "
+        "Tu rol es FORENSE PROACTIVO: si crees que falta data, ejecutas la herramienta "
+        "ANTES de responder. Si la herramienta no puede ejecutarse desde aqui, "
+        "explicalo y entrega TU MEJOR ANALISIS con la data que SI tienes — pero NO "
+        "pidas permiso. Despues de tu analisis completo, opcionalmente puedes "
+        "sugerir 'siguiente linea de investigacion: X', pero como propuesta concreta, "
+        "no como peticion de permiso.\n"
+        "11. [PROHIBIDO PLACEHOLDERS EN MARCADORES] El marcador "
+        "`[EJECUTAR_INFILTRACION: ...]` SOLO acepta un RUT real con formato "
+        "`12345678-9` o `76.111.222-3`. NUNCA escribas cosas como "
+        "`[EJECUTAR_INFILTRACION: lista de municipalidades]` o `[EJECUTAR_INFILTRACION: <rut>]` "
+        "literal — el sistema lo ignora. Si no tienes un RUT concreto, NO emitas el "
+        "marcador; en su lugar lista los RUTs candidatos y pidele al usuario que "
+        "clickee el que quiera infiltrar.\n"
+        "12. [QUERIES MASIVAS — USA LA DATA QUE TE DI] Si el usuario pregunta 'top 5 "
+        "municipalidades con peor ratio trato directo', YA tienes ese top en "
+        "'ORGANISMOS CON >80% TRATO DIRECTO' o 'TOP 10 MUNICIPALIDADES POR RATIO DE "
+        "TRATO DIRECTO' del contexto BD. NO digas 'no aparecen municipalidades' si la "
+        "lista MUNI esta vacia — di EXACTAMENTE: 'En los datos disponibles "
+        "(N>=10 OC) no figuran municipalidades en el top, lo cual sugiere que la "
+        "cobertura de la BD prioriza otros tipos de organismo'. Y luego entrega el "
+        "TOP GLOBAL real que SI tienes.\n"
     )
 
 

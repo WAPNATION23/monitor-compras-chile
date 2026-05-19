@@ -604,43 +604,125 @@ def build_web_context(prompt: str) -> str:
         },
     ]
 
-    all_parts = []
+    all_parts: list[str] = []
+    sources_summary: list[str] = []  # status linea por fuente (para forzar transparencia)
 
+    # ── Fallback: Bing HTML scrape para cuando DDG retorna 0 ──
+    def _bing_fallback(query: str, max_results: int) -> list[dict[str, str]]:
+        try:
+            import requests as _req
+            from urllib.parse import quote_plus
+            url = f"https://www.bing.com/search?q={quote_plus(query)}&setlang=es&cc=cl"
+            headers = {
+                "User-Agent": (
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                    "(KHTML, like Gecko) Chrome/120.0 Safari/537.36"
+                ),
+                "Accept-Language": "es-CL,es;q=0.9,en;q=0.8",
+            }
+            r = _req.get(url, headers=headers, timeout=8)
+            if r.status_code != 200:
+                return []
+            # Parser regex super liviano: titulo + url + snippet por bloque <li class="b_algo">
+            import re as _re
+            results = []
+            blocks = _re.findall(
+                r'<li class="b_algo"[^>]*>(.*?)</li>',
+                r.text, _re.DOTALL,
+            )
+            for b in blocks[:max_results]:
+                m_h = _re.search(r'<h2[^>]*>.*?<a [^>]*href="([^"]+)"[^>]*>(.*?)</a>', b, _re.DOTALL)
+                m_s = _re.search(r'<p[^>]*>(.*?)</p>', b, _re.DOTALL)
+                if not m_h:
+                    continue
+                href = m_h.group(1)
+                title = _re.sub(r"<[^>]+>", "", m_h.group(2)).strip()
+                body = _re.sub(r"<[^>]+>", "", m_s.group(1)).strip() if m_s else ""
+                results.append({"href": href, "title": title, "body": body})
+            return results
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("Bing fallback fallo: %s", exc)
+            return []
+
+    # Estado del provider principal (para reportar tambien si DDG cayo entero)
+    ddgs_ok = True
     try:
         from duckduckgo_search import DDGS
+        _ddgs_ctx = DDGS(timeout=10)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("DDGS no disponible: %s", exc)
+        ddgs_ok = False
+        _ddgs_ctx = None
 
-        with DDGS(timeout=10) as ddgs:
-            for source in _OSINT_QUERIES:
+    try:
+        if ddgs_ok and _ddgs_ctx is not None:
+            ddgs = _ddgs_ctx.__enter__()
+        else:
+            ddgs = None
+
+        for source in _OSINT_QUERIES:
+            label = source["label"]
+            results: list[dict[str, str]] = []
+            origin = "—"
+            err: str | None = None
+
+            # Intento 1: DuckDuckGo
+            if ddgs is not None:
                 try:
-                    resultados = list(ddgs.text(
+                    results = list(ddgs.text(
                         source["query"],
                         region="cl-es",
                         safesearch="off",
                         max_results=source["max_results"],
                     ))
-                    if resultados:
-                        all_parts.append(f"\n### {source['label']} ###")
-                        for r in resultados:
-                            title = r.get("title", "")
-                            body = r.get("body", "")
-                            href = r.get("href", "")
-                            all_parts.append(
-                                f"TITULO: {title}\n"
-                                f"TEXTO: {body}\n"
-                                f"URL: {href}\n"
-                            )
-                except Exception as exc:
-                    logger.debug("Error en búsqueda OSINT [%s]: %s", source["label"], exc)
-                    continue
+                    if results:
+                        origin = "DDG"
+                except Exception as exc:  # noqa: BLE001
+                    err = f"DDG:{type(exc).__name__}"
+                    logger.debug("DDG fail [%s]: %s", label, exc)
 
-    except Exception as exc:
-        logger.warning("Error en búsqueda web: %s", exc)
-        return "[No se pudo acceder a búsqueda web. Usando solo memoria interna.]"
+            # Intento 2: Bing scrape si DDG dio 0
+            if not results:
+                bing_results = _bing_fallback(source["query"], source["max_results"])
+                if bing_results:
+                    results = bing_results
+                    origin = "Bing-fallback"
 
+            # Loguea status en el summary (siempre, incluso si vacio)
+            if results:
+                sources_summary.append(f"[OK] {label} — {len(results)} hits via {origin}")
+                all_parts.append(f"\n### {label} ###")
+                for r in results:
+                    title = r.get("title", "")
+                    body = r.get("body", "")
+                    href = r.get("href", "")
+                    all_parts.append(
+                        f"TITULO: {title}\nTEXTO: {body}\nURL: {href}\n"
+                    )
+            else:
+                tag = err or "0 hits"
+                sources_summary.append(f"[VACIO] {label} — {tag} (query: {source['query'][:80]})")
+    finally:
+        if ddgs_ok and _ddgs_ctx is not None:
+            try:
+                _ddgs_ctx.__exit__(None, None, None)
+            except Exception:  # noqa: BLE001
+                pass
+
+    # Header con resumen de fuentes consultadas — fuerza a la IA a citar todo
+    header_lines = [
+        "### RESUMEN DE BUSQUEDAS WEB EJECUTADAS (TRANSPARENCIA OBLIGATORIA) ###",
+        f"Termino base: '{search_term}'",
+        f"Fuentes consultadas: {len(_OSINT_QUERIES)} clusters OSINT",
+    ]
+    header_lines.extend(sources_summary)
     if not all_parts:
-        return "[Sin resultados en fuentes OSINT web.]"
+        header_lines.append(
+            "[ADVERTENCIA] Ninguna fuente retorno datos. NO concluyas 'no existe'; "
+            "indica que la web estuvo limitada y propon busqueda manual por el usuario."
+        )
 
-    return "\n".join(all_parts)
+    return "\n".join(header_lines) + ("\n" + "\n".join(all_parts) if all_parts else "")
 
 
 # ──────────────────────────────────────────────────────────────────────────
@@ -792,6 +874,25 @@ def build_system_prompt(web_context: str, db_context: str,
         "7. [HERRAMIENTA AUTONOMA — INFILTRACION] Si detectas un RUT (ej. '76.111.222-3'), "
         "puedes ordenar descargar su historial completo anadiendo al final de tu respuesta: "
         "`[EJECUTAR_INFILTRACION: 76.111.222-3]`\n"
+        "8. [FOOTER OBLIGATORIO — TRANSPARENCIA DE FUENTES] Al final de TODA respuesta "
+        "que implique investigar persona/empresa/organismo, agrega un bloque "
+        "'### Fuentes Consultadas ###' donde enumeres CADA cluster OSINT del "
+        "'RESUMEN DE BUSQUEDAS WEB EJECUTADAS' (te lo entrego arriba) marcando:\n"
+        "   - ✅ si trajo datos utiles que citaste,\n"
+        "   - ⚠️  si trajo datos pero no eran relevantes,\n"
+        "   - ❌ si retorno 0 (indica si fue por bloqueo, query mala, o ausencia real).\n"
+        "Esto NO es opcional: el usuario debe saber EXACTAMENTE que se reviso. Si te "
+        "saltas el footer, la respuesta se considera INCOMPLETA. Ejemplo:\n"
+        "   ### Fuentes Consultadas ###\n"
+        "   - ✅ Busqueda general (3 hits, 1 RUT identificado)\n"
+        "   - ❌ Mercado Publico / ChileCompra (0 hits — empresa probablemente no vende al Estado)\n"
+        "   - ✅ Directorios de empresas (rut.cl: RUT 76.xxx.xxx-x)\n"
+        "   - ❌ Dateas.com (0 hits)\n"
+        "   - etc.\n"
+        "9. [NO TE ENGANCHES EN 'VENDE AL ESTADO'] Una empresa puede existir y ser "
+        "investigable aunque NO licite con el Estado. Si Mercado Publico no la tiene, "
+        "NO concluyas 'no existe' — busca en directorios (rut.cl, guiaempresaschile), "
+        "prensa regional, redes. Mercado Publico es solo UNA de varias fuentes.\n"
     )
 
 

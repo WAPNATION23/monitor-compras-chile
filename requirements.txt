@@ -7,5 +7,8 @@ python-dotenv>=1.0,<2
 beautifulsoup4>=4.12,<5
 lxml>=5.1,<7
 openpyxl>=3.1,<4
+# Paquete OSINT principal. 'ddgs' es la nueva version oficial; mantenemos
+# 'duckduckgo-search' como fallback transitorio para entornos viejos.
+ddgs>=9.0,<10
 duckduckgo-search>=4.0,<9
 reportlab>=4.0,<5

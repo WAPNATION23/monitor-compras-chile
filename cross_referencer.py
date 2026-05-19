@@ -120,23 +120,36 @@ class CrossReferencer:
         # Marcar tratos directos
         df["es_trato_directo"] = df["tipo_oc"].isin(OC_TIPO_TRATO_DIRECTO)
 
-        agg = df.groupby(["rut_comprador", "nombre_comprador"]).agg(
+        # Canonicalizar nombre por RUT: usar el nombre mas frecuente para cada RUT.
+        # Esto evita filas duplicadas (mismo RUT, distintas variantes de nombre) que
+        # rompian el calculo de pct_monto_td al hacer merges desalineados.
+        nombre_canon = (
+            df.groupby(["rut_comprador", "nombre_comprador"])
+            .size()
+            .reset_index(name="_n")
+            .sort_values(["rut_comprador", "_n"], ascending=[True, False])
+            .drop_duplicates(subset=["rut_comprador"], keep="first")
+            [["rut_comprador", "nombre_comprador"]]
+        )
+
+        agg = df.groupby("rut_comprador").agg(
             n_total=("codigo_oc", "nunique"),
             monto_total=("monto_total_item", "sum"),
         ).reset_index()
+        agg = agg.merge(nombre_canon, on="rut_comprador", how="left")
 
-        # Contar OC únicas (no ítems) que son trato directo
+        # Contar OC unicas (no items) que son trato directo, agregando por RUT
         td_oc_counts = (
             df[df["es_trato_directo"]]
-            .groupby(["rut_comprador", "nombre_comprador"])["codigo_oc"]
+            .groupby("rut_comprador")["codigo_oc"]
             .nunique()
             .reset_index()
             .rename(columns={"codigo_oc": "n_trato_directo"})
         )
-        agg = agg.merge(td_oc_counts, on=["rut_comprador", "nombre_comprador"], how="left")
+        agg = agg.merge(td_oc_counts, on="rut_comprador", how="left")
         agg["n_trato_directo"] = agg["n_trato_directo"].fillna(0).astype(int)
 
-        # Calcular monto de tratos directos
+        # Calcular monto de tratos directos por RUT
         td_montos = df[df["es_trato_directo"]].groupby("rut_comprador").agg(
             monto_td=("monto_total_item", "sum"),
         ).reset_index()
@@ -144,9 +157,11 @@ class CrossReferencer:
         agg = agg.merge(td_montos, on="rut_comprador", how="left")
         agg["monto_td"] = agg["monto_td"].fillna(0)
         agg["ratio_td"] = (agg["n_trato_directo"] / agg["n_total"] * 100).round(1)
-        agg["pct_monto_td"] = (agg["monto_td"] / agg["monto_total"] * 100).round(1)
+        # pct_monto_td clampeado a [0,100] para evitar artefactos por notas de credito negativas
+        denom = agg["monto_total"].where(agg["monto_total"].abs() > 0, 1)
+        agg["pct_monto_td"] = (agg["monto_td"] / denom * 100).clip(lower=0, upper=100).round(1)
 
-        # Ordenar por ratio más alto
+        # Ordenar por ratio mas alto
         agg = agg.sort_values("ratio_td", ascending=False)
 
         return agg

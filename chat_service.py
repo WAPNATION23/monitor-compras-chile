@@ -668,13 +668,23 @@ def build_web_context(prompt: str) -> str:
 
     # Estado del provider principal (para reportar tambien si DDG cayo entero)
     ddgs_ok = True
+    _ddgs_ctx = None
+    # El paquete oficial migro de 'duckduckgo_search' a 'ddgs'. Intentamos el
+    # nuevo primero; si no esta instalado, caemos al viejo (que aun funciona
+    # pero emite RuntimeWarning de deprecacion).
     try:
-        from duckduckgo_search import DDGS
+        from ddgs import DDGS  # type: ignore
         _ddgs_ctx = DDGS(timeout=10)
+    except ImportError:
+        try:
+            from duckduckgo_search import DDGS  # type: ignore
+            _ddgs_ctx = DDGS(timeout=10)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("DDGS no disponible (ni ddgs ni duckduckgo_search): %s", exc)
+            ddgs_ok = False
     except Exception as exc:  # noqa: BLE001
         logger.warning("DDGS no disponible: %s", exc)
         ddgs_ok = False
-        _ddgs_ctx = None
 
     try:
         if ddgs_ok and _ddgs_ctx is not None:

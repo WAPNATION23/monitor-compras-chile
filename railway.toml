@@ -1,0 +1,25 @@
+# Ojo del Pueblo — Railway (Hobby)
+# Build: Dockerfile. Web = CMD "web". Cron = servicio aparte con schedule.
+
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+healthcheckPath = "/_stcore/health"
+healthcheckTimeout = 120
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 5
+
+# Variables en el dashboard Railway (ambos servicios):
+#   MERCADO_PUBLICO_TICKET
+#   DEEPSEEK_API_KEY
+#   TELEGRAM_TOKEN / TELEGRAM_CHAT_ID (opcional)
+#   OJO_DATA_DIR=/data
+#   DISABLE_STREAMLIT_SCHEDULER=1
+#
+# Volumen persistente montado en /data (compartido web + cron).
+#
+# Servicio CRON (Railway Cron Job o servicio con schedule):
+#   Start Command: update
+#   Cron: 0 7 * * *   (= 04:00 Chile)

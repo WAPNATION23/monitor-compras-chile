@@ -18,7 +18,21 @@ from datetime import datetime
 import requests
 from dotenv import load_dotenv
 
-from config import API_BUSCAR_PROVEEDOR_URL, API_OC_URL, DB_NAME, REQUEST_TIMEOUT
+from config import (
+    API_BUSCAR_PROVEEDOR_URL,
+    API_OC_URL,
+    BRAVE_SEARCH_API_KEY,
+    DB_NAME,
+    REQUEST_TIMEOUT,
+    TAVILY_API_KEY,
+)
+from forensic_tools import (
+    format_confidence_label,
+    tool_datos_gob_sanciones,
+    tool_dipres_presupuesto,
+    tool_infoprobidad_persona,
+    tool_licitaciones,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -115,6 +129,10 @@ _INTENT_KEYWORDS = {
         "vampiro", "fantasma", "sobreprecio", "irregularidad", "riesgo",
         "alerta", "concentración", "concentracion", "trato directo",
     ],
+    "licitacion": [
+        "licitación", "licitacion", "licita", "adjudicación", "adjudicacion",
+        "convocatoria", "pliego", "postulación", "postulacion",
+    ],
     "resumen": [
         "resumen", "dashboard", "general", "estadísticas", "estadisticas",
         "reporte", "ejecutivo", "panorama", "estado",
@@ -156,6 +174,22 @@ def _tool_person_search(prompt: str) -> tuple[str, str]:
     except Exception as exc:
         logger.warning("Error en búsqueda de persona: %s", exc)
         return "Búsqueda de Persona", f"[Error: {exc}]"
+
+
+def _tool_licitaciones(prompt: str) -> tuple[str, str]:
+    return tool_licitaciones(prompt, _STOPWORDS)
+
+
+def _tool_dipres(prompt: str) -> tuple[str, str]:
+    return tool_dipres_presupuesto(prompt)
+
+
+def _tool_datos_gob(prompt: str) -> tuple[str, str]:
+    return tool_datos_gob_sanciones(prompt, _STOPWORDS)
+
+
+def _tool_infoprobidad_search(prompt: str) -> tuple[str, str]:
+    return tool_infoprobidad_persona(prompt)
 
 
 def _tool_anomaly_scan(prompt: str) -> tuple[str, str]:
@@ -300,7 +334,9 @@ def _tool_fiscalizaciones_cgr(prompt: str) -> tuple[str, str]:
 
 
 def _tool_infoprobidad(prompt: str) -> tuple[str, str]:
-    """Busca conflictos de interés en InfoProbidad."""
+    """Busca conflictos de interés — persona del prompt o top proveedores."""
+    if any(k in prompt.lower() for k in _INTENT_KEYWORDS.get("persona", [])):
+        return _tool_infoprobidad_search(prompt)
     try:
         from infoprobidad_connector import InfoProbidadConnector
         ip = InfoProbidadConnector(DB_PATH)
@@ -407,8 +443,9 @@ def build_db_context(prompt: str) -> str:
             if rut_detected:
                 rows = conn.execute(
                     """
-                    SELECT codigo_oc, nombre_proveedor, monto_total_item, nombre_comprador,
-                           tipo_oc, categoria, fecha_creacion, rut_proveedor
+                    SELECT codigo_oc, nombre_proveedor, monto_total_item, monto_total_item_clp,
+                           nombre_comprador, nombre_unidad, nombre_organismo,
+                           tipo_oc, categoria, fecha_creacion, rut_proveedor, tipo_moneda
                     FROM ordenes_items
                     WHERE rut_proveedor = ?
                     ORDER BY monto_total_item DESC
@@ -474,8 +511,9 @@ def build_db_context(prompt: str) -> str:
                     cond_prov = " AND ".join(["nombre_proveedor LIKE ?" for _ in params])
                     rows = conn.execute(
                         f"""
-                        SELECT codigo_oc, nombre_proveedor, monto_total_item, nombre_comprador,
-                               tipo_oc, categoria, fecha_creacion, rut_proveedor
+                        SELECT codigo_oc, nombre_proveedor, monto_total_item, monto_total_item_clp,
+                               nombre_comprador, nombre_unidad, nombre_organismo,
+                               tipo_oc, categoria, fecha_creacion, rut_proveedor, tipo_moneda
                         FROM ordenes_items
                         WHERE {cond_prov}
                         ORDER BY monto_total_item DESC
@@ -489,9 +527,15 @@ def build_db_context(prompt: str) -> str:
             if rows:
                 db_context += f"\n### DATOS ENCONTRADOS EN BASE DE DATOS LOCAL ({len(rows)} resultados):\n"
                 for r in rows:
+                    monto_clp = r[3] if r[3] else r[2]
+                    org = r[5] or r[4] or "?"
+                    unidad = r[4] or ""
+                    moneda = r[11] or "CLP"
                     db_context += (
-                        f"- OC: {r[0]} | Proveedor: {r[1]} | Monto: ${r[2]:,.0f} CLP "
-                        f"| Comprador: {r[3]} | Tipo: {r[4]} | Cat: {r[5]} | Fecha: {r[6]}\n"
+                        f"- OC: {r[0]} | Proveedor: {r[1]} | Monto CLP: ${monto_clp:,.0f} "
+                        f"(orig {moneda} ${r[2]:,.0f}) | Organismo: {org}"
+                        + (f" | Unidad: {unidad}" if unidad and unidad != org else "")
+                        + f" | Tipo: {r[7]} | Fecha: {r[9]} | RUT: {r[10] or 'N/D'}\n"
                     )
 
                 # Auto-buscar RUT en API para el proveedor top
@@ -526,17 +570,22 @@ def build_db_context(prompt: str) -> str:
 
             # Compradores/organismos
             params_comp = [f"%{p}%" for p in palabras[:5]]
-            conditions_comp = " OR ".join(["nombre_comprador LIKE ?" for _ in params_comp])
+            conditions_comp = " OR ".join([
+                "nombre_comprador LIKE ? OR nombre_organismo LIKE ?" for _ in params_comp
+            ])
+            flat_comp = []
+            for p in params_comp:
+                flat_comp.extend([p, p])
             rows_comp = conn.execute(
                 f"""
-                SELECT nombre_comprador, COUNT(*) as n, SUM(monto_total_item) as total
+                SELECT nombre_comprador, COUNT(*) as n, SUM(COALESCE(monto_total_item_clp, monto_total_item)) as total
                 FROM ordenes_items
                 WHERE {conditions_comp}
                 GROUP BY nombre_comprador
                 ORDER BY total DESC
                 LIMIT 5
                 """,
-                params_comp,
+                flat_comp,
             ).fetchall()
             if rows_comp and rows_comp[0][1] > 0:
                 db_context += "\n### ORGANISMOS COMPRADORES RELACIONADOS:\n"
@@ -547,6 +596,48 @@ def build_db_context(prompt: str) -> str:
         db_context = ""
 
     return db_context
+
+
+def _search_api_web(query: str, max_results: int = 5) -> list[dict[str, str]]:
+    """Búsqueda web vía API estable (Tavily o Brave). Retorna [] si no hay key."""
+    results: list[dict[str, str]] = []
+    if TAVILY_API_KEY:
+        try:
+            r = requests.post(
+                "https://api.tavily.com/search",
+                json={"api_key": TAVILY_API_KEY, "query": query, "max_results": max_results, "include_answer": False},
+                timeout=15,
+            )
+            if r.status_code == 200:
+                for item in r.json().get("results", []):
+                    results.append({
+                        "title": item.get("title", ""),
+                        "body": item.get("content", ""),
+                        "href": item.get("url", ""),
+                    })
+                if results:
+                    return results
+        except requests.RequestException as exc:
+            logger.debug("Tavily fail: %s", exc)
+
+    if BRAVE_SEARCH_API_KEY:
+        try:
+            r = requests.get(
+                "https://api.search.brave.com/res/v1/web/search",
+                headers={"Accept": "application/json", "X-Subscription-Token": BRAVE_SEARCH_API_KEY},
+                params={"q": query, "count": max_results, "country": "cl", "search_lang": "es"},
+                timeout=15,
+            )
+            if r.status_code == 200:
+                for item in r.json().get("web", {}).get("results", []):
+                    results.append({
+                        "title": item.get("title", ""),
+                        "body": item.get("description", ""),
+                        "href": item.get("url", ""),
+                    })
+        except requests.RequestException as exc:
+            logger.debug("Brave fail: %s", exc)
+    return results
 
 
 def build_web_context(prompt: str) -> str:
@@ -567,6 +658,18 @@ def build_web_context(prompt: str) -> str:
     # Rebuild a clean search term from the original prompt (not stopword-filtered)
     # but cap it to avoid DDG rejecting overly long queries
     search_term = " ".join(prompt.split()[:12])
+
+    # API de búsqueda estable (Fase 3) — prioridad sobre DDG
+    api_hits = _search_api_web(f"{search_term} chile", max_results=6)
+    if api_hits:
+        all_parts_api = ["\n### API de búsqueda (Tavily/Brave) ###"]
+        for r in api_hits:
+            all_parts_api.append(
+                f"TITULO: {r.get('title', '')}\nTEXTO: {r.get('body', '')}\nURL: {r.get('href', '')}\n"
+            )
+        api_block = "\n".join(all_parts_api)
+    else:
+        api_block = ""
 
     # Define targeted search queries for each OSINT source cluster
     _OSINT_QUERIES = [
@@ -754,7 +857,7 @@ def build_web_context(prompt: str) -> str:
             "indica que la web estuvo limitada y propon busqueda manual por el usuario."
         )
 
-    return "\n".join(header_lines) + ("\n" + "\n".join(all_parts) if all_parts else "")
+    return "\n".join(header_lines) + (api_block or "") + ("\n" + "\n".join(all_parts) if all_parts else "")
 
 
 # ──────────────────────────────────────────────────────────────────────────
@@ -763,12 +866,13 @@ def build_web_context(prompt: str) -> str:
 
 # Mapa de intención → herramientas a ejecutar
 _INTENT_TOOL_MAP: dict[str, list] = {
-    "persona":  [_tool_person_search, _tool_cross_servel],
-    "proveedor": [_tool_anomaly_scan, _tool_fiscalizaciones_cgr],
-    "organismo": [_tool_anomaly_scan, _tool_fiscalizaciones_cgr, _tool_infoprobidad],
-    "anomalia":  [_tool_anomaly_scan, _tool_cross_servel, _tool_infoprobidad],
-    "resumen":   [_tool_executive_report],
-    "general":   [_tool_executive_report],
+    "persona": [_tool_person_search, _tool_cross_servel, _tool_infoprobidad_search, _tool_datos_gob],
+    "proveedor": [_tool_anomaly_scan, _tool_fiscalizaciones_cgr, _tool_licitaciones],
+    "organismo": [_tool_anomaly_scan, _tool_fiscalizaciones_cgr, _tool_infoprobidad, _tool_licitaciones],
+    "anomalia": [_tool_anomaly_scan, _tool_cross_servel, _tool_infoprobidad, _tool_datos_gob],
+    "licitacion": [_tool_licitaciones, _tool_anomaly_scan, _tool_dipres],
+    "resumen": [_tool_executive_report],
+    "general": [_tool_executive_report, _tool_licitaciones],
 }
 
 
@@ -805,6 +909,21 @@ def build_forensic_context(prompt: str) -> tuple[str, list[str]]:
             logger.warning("Error en herramienta %s: %s", tool_fn.__name__, exc)
 
     context = "\n".join(results)
+
+    # Fase 4: registrar caso para revisión humana en investigaciones concretas
+    if any(i in intents for i in ("persona", "proveedor", "organismo", "licitacion")):
+        try:
+            from case_review import crear_caso_revision
+
+            titulo = prompt.strip()[:120] or "Investigación IA"
+            crear_caso_revision(
+                titulo=titulo,
+                resumen=context[:4000],
+                creado_por="conan_ia",
+            )
+        except Exception as exc:
+            logger.debug("No se pudo registrar caso revisión: %s", exc)
+
     return context, tools_used
 
 
@@ -813,9 +932,14 @@ def build_system_prompt(web_context: str, db_context: str,
     """Construye el system prompt para DeepSeek con inteligencia forense."""
     fecha_actual = datetime.now().strftime("%Y-%m-%d")
     return (
-        "Eres el 'Cerebro Forense' de la plataforma anticorrupcion 'Ojo del Pueblo'. "
-        "Tu mision: analizar datos financieros y politicos con rigor forense. "
-        "Tono: directo, profesional, basado en evidencia (analista OSINT senior).\n"
+        "Eres 'Conan', el detective forense de la plataforma anticorrupción 'Ojo del Pueblo'. "
+        "Tu misión: analizar datos financieros y políticos con rigor forense. "
+        "Tono: directo, sobrio, periodístico — como un fiscal que arma un dossier, no un acusador. "
+        "Nunca afirmes delito; habla de 'señales', 'patrones' y 'evidencia'. "
+        "Marca cada hallazgo con nivel de confianza: [ALTA], [MEDIA] o [BAJA].\n"
+        f"Referencia de confianza: Mercado Público por RUT = {format_confidence_label('mercado_publico', 'rut')}; "
+        f"SERVEL por nombre = {format_confidence_label('servel', 'nombre')}; "
+        f"scores estadísticos = {format_confidence_label('heuristica', 'heuristica')}.\n"
         f"Fecha de hoy: {fecha_actual}.\n"
         "\n======================================\n"
         "== INTELIGENCIA FORENSE (Herramientas Automaticas) ==\n"
@@ -825,8 +949,9 @@ def build_system_prompt(web_context: str, db_context: str,
         "== MERCADO PUBLICO + BD LOCAL (FUENTE PRIMARIA OFICIAL) ==\n"
         "======================================\n"
         "Esta seccion contiene datos cruzados de la API oficial de Mercado Publico "
-        "(api.mercadopublico.cl) y la base de datos local con 54.000+ ordenes de "
-        "compra extraidas de esa misma API. Es la EVIDENCIA PRIMARIA del expediente.\n"
+        "(api.mercadopublico.cl) y la base de datos local. Es la EVIDENCIA PRIMARIA del expediente.\n"
+        "Montos en CLP normalizados usan monto_total_item_clp cuando existe (conversión UF/USD).\n"
+        "nombre_comprador = organismo real (NombreOrganismo); nombre_unidad = unidad de compra interna.\n"
         f"{db_context}\n"
         "\n======================================\n"
         "== CONTEXTO WEB OSINT (Fuentes complementarias en tiempo real) ==\n"

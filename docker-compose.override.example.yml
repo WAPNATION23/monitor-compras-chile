@@ -1,0 +1,13 @@
+# Copiar a docker-compose.override.yml para usar tu BD local existente:
+#   mkdir -p data
+#   copy auditoria_estado.db data\
+#   copy .env.example .env   (editar secretos)
+#   docker compose up -d --build
+
+services:
+  web:
+    volumes:
+      - ./data:/data
+  cron:
+    volumes:
+      - ./data:/data

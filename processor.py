@@ -18,7 +18,13 @@ Campos almacenados por ítem:
   • precio_unitario    – Precio neto unitario ($CLP)
   • monto_total_item   – Precio unitario × cantidad
   • rut_comprador      – RUT del organismo comprador
-  • nombre_comprador   – Nombre del organismo comprador
+  • nombre_comprador   – Nombre del organismo comprador (NombreOrganismo)
+  • nombre_unidad      – Unidad de compra (NombreUnidad)
+  • nombre_organismo   – Alias explícito del organismo (mismo valor que nombre_comprador)
+  • tipo_moneda        – Moneda de la OC (CLP, UF, USD, EUR)
+  • monto_total_oc     – Total bruto de la OC según API (incl. IVA según moneda)
+  • precio_unitario_clp – Precio unitario neto convertido a CLP
+  • monto_total_item_clp – Monto ítem convertido a CLP
   • rut_proveedor      – RUT del proveedor adjudicado
   • nombre_proveedor   – Nombre del proveedor
   • fecha_creacion     – Fecha de creación de la OC
@@ -38,6 +44,7 @@ from typing import Any
 import pandas as pd
 
 from config import DB_NAME, RISK_CLASSIFICATION
+from currency_utils import to_clp
 
 logger = logging.getLogger(__name__)
 
@@ -54,12 +61,18 @@ CREATE TABLE IF NOT EXISTS ordenes_items (
     monto_total_item REAL,
     rut_comprador    TEXT,
     nombre_comprador TEXT,
+    nombre_unidad    TEXT,
+    nombre_organismo TEXT,
     rut_proveedor    TEXT,
     nombre_proveedor TEXT,
     fecha_creacion   TEXT,
     estado           TEXT,
     tipo_oc          TEXT    DEFAULT '',
     categoria_riesgo TEXT    DEFAULT 'GENERAL',
+    tipo_moneda      TEXT    DEFAULT 'CLP',
+    monto_total_oc   REAL,
+    precio_unitario_clp REAL,
+    monto_total_item_clp REAL,
     fecha_ingreso    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(codigo_oc, nombre_producto, precio_unitario, cantidad)
 );
@@ -71,6 +84,8 @@ _CREATE_INDEXES_SQL: list[str] = [
     "CREATE INDEX IF NOT EXISTS idx_rut_proveedor ON ordenes_items (rut_proveedor);",
     "CREATE INDEX IF NOT EXISTS idx_rut_comprador ON ordenes_items (rut_comprador);",
     "CREATE INDEX IF NOT EXISTS idx_fecha_creacion ON ordenes_items (fecha_creacion);",
+    "CREATE INDEX IF NOT EXISTS idx_nombre_organismo ON ordenes_items (nombre_organismo);",
+    "CREATE INDEX IF NOT EXISTS idx_codigo_oc ON ordenes_items (codigo_oc);",
     # Crítico para cruce SERVEL vs. compras: sin este índice el JOIN por nombre
     # convierte la query en un producto cartesiano (>100s en 54k filas).
     "CREATE INDEX IF NOT EXISTS idx_nombre_proveedor ON ordenes_items (nombre_proveedor);",
@@ -80,7 +95,22 @@ _CREATE_INDEXES_SQL: list[str] = [
 _MIGRATION_COLUMNS: list[tuple[str, str]] = [
     ("tipo_oc", "TEXT DEFAULT ''"),
     ("categoria_riesgo", "TEXT DEFAULT 'GENERAL'"),
+    ("nombre_unidad", "TEXT"),
+    ("nombre_organismo", "TEXT"),
+    ("tipo_moneda", "TEXT DEFAULT 'CLP'"),
+    ("monto_total_oc", "REAL"),
+    ("precio_unitario_clp", "REAL"),
+    ("monto_total_item_clp", "REAL"),
 ]
+
+_INSERT_COLUMNS: tuple[str, ...] = (
+    "codigo_oc", "nombre_producto", "categoria", "cantidad",
+    "precio_unitario", "monto_total_item", "rut_comprador",
+    "nombre_comprador", "nombre_unidad", "nombre_organismo",
+    "rut_proveedor", "nombre_proveedor",
+    "fecha_creacion", "estado", "tipo_oc", "categoria_riesgo",
+    "tipo_moneda", "monto_total_oc", "precio_unitario_clp", "monto_total_item_clp",
+)
 
 
 class DataProcessor:
@@ -97,10 +127,8 @@ class DataProcessor:
         try:
             with sqlite3.connect(self.db_path) as conn:
                 conn.execute(_CREATE_TABLE_SQL)
-                for idx_sql in _CREATE_INDEXES_SQL:
-                    conn.execute(idx_sql)
 
-                # Migraciones: agregar columnas faltantes
+                # Migraciones ANTES de índices (columnas nuevas)
                 for col_name, col_def in _MIGRATION_COLUMNS:
                     try:
                         conn.execute(
@@ -109,6 +137,11 @@ class DataProcessor:
                         logger.info("Migración: columna '%s' agregada.", col_name)
                     except sqlite3.OperationalError:
                         pass  # Columna ya existe
+
+                self._backfill_legacy_columns(conn)
+
+                for idx_sql in _CREATE_INDEXES_SQL:
+                    conn.execute(idx_sql)
 
                 # Migración: actualizar UNIQUE constraint si falta 'cantidad'
                 self._migrate_unique_constraint(conn)
@@ -164,6 +197,45 @@ class DataProcessor:
         )
         conn.execute("DROP TABLE _ordenes_items_old")
         logger.info("Migración de UNIQUE constraint completada.")
+
+    @staticmethod
+    def _backfill_legacy_columns(conn: sqlite3.Connection) -> None:
+        """Rellena columnas nuevas en filas históricas cuando sea posible."""
+        try:
+            conn.execute(
+                """
+                UPDATE ordenes_items
+                SET nombre_unidad = nombre_comprador
+                WHERE (nombre_unidad IS NULL OR nombre_unidad = '')
+                  AND nombre_comprador IS NOT NULL AND nombre_comprador != ''
+                """
+            )
+            conn.execute(
+                """
+                UPDATE ordenes_items
+                SET nombre_organismo = nombre_comprador
+                WHERE (nombre_organismo IS NULL OR nombre_organismo = '')
+                  AND nombre_comprador IS NOT NULL AND nombre_comprador != ''
+                """
+            )
+            conn.execute(
+                """
+                UPDATE ordenes_items
+                SET tipo_moneda = 'CLP'
+                WHERE tipo_moneda IS NULL OR tipo_moneda = ''
+                """
+            )
+            conn.execute(
+                """
+                UPDATE ordenes_items
+                SET precio_unitario_clp = precio_unitario,
+                    monto_total_item_clp = monto_total_item
+                WHERE (precio_unitario_clp IS NULL OR precio_unitario_clp = 0)
+                  AND precio_unitario IS NOT NULL AND precio_unitario > 0
+                """
+            )
+        except sqlite3.Error as exc:
+            logger.debug("Backfill legacy columns: %s", exc)
 
     # ──────────────── Clasificación de riesgo ─────────────── #
 
@@ -256,10 +328,23 @@ class DataProcessor:
             fechas.get("FechaCreacion", "") if isinstance(fechas, dict) else ""
         ) or oc.get("FechaCreacion", "")
 
-        # Comprador
+        # Comprador — organismo real vs unidad de compra
         comprador: dict[str, Any] = oc.get("Comprador", {})
         rut_comprador: str = DataProcessor._normalize_rut(comprador.get("RutUnidad", ""))
-        nombre_comprador: str = comprador.get("NombreUnidad", "")
+        nombre_unidad: str = (comprador.get("NombreUnidad") or "").strip()
+        nombre_organismo: str = (
+            comprador.get("NombreOrganismo")
+            or comprador.get("NombreUnidadCompra")
+            or nombre_unidad
+        ).strip()
+        nombre_comprador: str = nombre_organismo or nombre_unidad
+
+        # Moneda y total OC
+        tipo_moneda: str = (oc.get("TipoMoneda") or oc.get("Moneda") or "CLP").upper().strip()
+        try:
+            monto_total_oc: float = float(oc.get("Total") or oc.get("TotalNeto") or 0)
+        except (TypeError, ValueError):
+            monto_total_oc = 0.0
 
         # Proveedor
         proveedor: dict[str, Any] = oc.get("Proveedor", {})
@@ -280,6 +365,9 @@ class DataProcessor:
         for item in items:
             cantidad: float = float(item.get("Cantidad", 0))
             precio_unitario: float = float(item.get("PrecioNeto", 0))
+            monto_item = cantidad * precio_unitario
+            precio_clp = to_clp(precio_unitario, tipo_moneda, fecha_creacion)
+            monto_clp = to_clp(monto_item, tipo_moneda, fecha_creacion)
             rows.append(
                 {
                     "codigo_oc": codigo_oc,
@@ -287,15 +375,21 @@ class DataProcessor:
                     "categoria": item.get("Categoria", ""),
                     "cantidad": cantidad,
                     "precio_unitario": precio_unitario,
-                    "monto_total_item": cantidad * precio_unitario,
+                    "monto_total_item": monto_item,
                     "rut_comprador": rut_comprador,
                     "nombre_comprador": nombre_comprador,
+                    "nombre_unidad": nombre_unidad,
+                    "nombre_organismo": nombre_organismo,
                     "rut_proveedor": rut_proveedor,
                     "nombre_proveedor": nombre_proveedor,
                     "fecha_creacion": fecha_creacion,
                     "estado": estado,
                     "tipo_oc": tipo_oc,
                     "categoria_riesgo": categoria_riesgo,
+                    "tipo_moneda": tipo_moneda,
+                    "monto_total_oc": monto_total_oc,
+                    "precio_unitario_clp": precio_clp,
+                    "monto_total_item_clp": monto_clp,
                 }
             )
 
@@ -350,26 +444,16 @@ class DataProcessor:
                 before_count = conn.execute("SELECT COUNT(*) FROM ordenes_items").fetchone()[0]
 
                 records = [
-                    (
-                        row["codigo_oc"], row["nombre_producto"],
-                        row["categoria"], row["cantidad"],
-                        row["precio_unitario"], row["monto_total_item"],
-                        row["rut_comprador"], row["nombre_comprador"],
-                        row["rut_proveedor"], row["nombre_proveedor"],
-                        row["fecha_creacion"], row["estado"],
-                        row["tipo_oc"], row["categoria_riesgo"],
-                    )
+                    tuple(row[col] for col in _INSERT_COLUMNS)
                     for row in df.to_dict("records")
                 ]
 
+                placeholders = ", ".join(["?"] * len(_INSERT_COLUMNS))
+                cols_sql = ", ".join(_INSERT_COLUMNS)
                 conn.executemany(
-                    """
-                    INSERT OR IGNORE INTO ordenes_items
-                        (codigo_oc, nombre_producto, categoria, cantidad,
-                         precio_unitario, monto_total_item, rut_comprador,
-                         nombre_comprador, rut_proveedor, nombre_proveedor,
-                         fecha_creacion, estado, tipo_oc, categoria_riesgo)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    f"""
+                    INSERT OR IGNORE INTO ordenes_items ({cols_sql})
+                    VALUES ({placeholders})
                     """,
                     records,
                 )
@@ -407,3 +491,51 @@ class DataProcessor:
             raise
 
         return df, inserted
+
+    def refresh_orders(self, ordenes: list[dict[str, Any]]) -> tuple[int, int]:
+        """
+        Re-sincroniza OCs existentes: borra ítems previos del código OC e inserta
+        datos frescos desde la API. Retorna (ocs_refrescadas, items_insertados).
+        """
+        if not ordenes:
+            return 0, 0
+
+        all_rows: list[dict[str, Any]] = []
+        codigos: set[str] = set()
+        for oc in ordenes:
+            if str(oc.get("CodigoEstado", "")) == "9":
+                continue
+            try:
+                codigo = oc.get("Codigo", "")
+                if codigo:
+                    codigos.add(str(codigo))
+                all_rows.extend(self._flatten_oc(oc))
+            except Exception as exc:
+                logger.warning("Error refrescando OC %s: %s", oc.get("Codigo", "?"), exc)
+
+        if not all_rows or not codigos:
+            return 0, 0
+
+        df = pd.DataFrame(all_rows)
+        df = df[df["precio_unitario"] > 0].copy()
+        df["nombre_producto"] = df["nombre_producto"].str.strip().str.upper()
+
+        inserted = 0
+        with sqlite3.connect(self.db_path) as conn:
+            for codigo in codigos:
+                conn.execute("DELETE FROM ordenes_items WHERE codigo_oc = ?", (codigo,))
+            records = [
+                tuple(row[col] for col in _INSERT_COLUMNS)
+                for row in df.to_dict("records")
+            ]
+            placeholders = ", ".join(["?"] * len(_INSERT_COLUMNS))
+            cols_sql = ", ".join(_INSERT_COLUMNS)
+            conn.executemany(
+                f"INSERT OR REPLACE INTO ordenes_items ({cols_sql}) VALUES ({placeholders})",
+                records,
+            )
+            conn.commit()
+            inserted = len(records)
+
+        logger.info("Re-sync: %d OC actualizadas, %d ítems.", len(codigos), inserted)
+        return len(codigos), inserted

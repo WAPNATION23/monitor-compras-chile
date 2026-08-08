@@ -48,9 +48,9 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      # ── 4. Ejecutar el pipeline con alertas a Telegram ──
-      - name: "🚀 Ejecutar monitor de compras"
-        run: python main.py --telegram --verbose
+      # ── 4. Ejecutar pipeline completo de actualización ──
+      - name: "🚀 Ejecutar daily_update (full)"
+        run: python daily_update.py --full --force
 
       # ── 5. Publicar la BD como artefacto (retención 7 días) ──
       # No se versiona en git: auditoria_estado.db está en .gitignore.

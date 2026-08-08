@@ -182,6 +182,10 @@ class MercadoPublicoExtractor:
             logger.error("No se pudo obtener detalle de OC %s: %s", codigo, exc)
             return None
 
+    def fetch_oc_detail(self, codigo: str) -> dict[str, Any] | None:
+        """API pública: detalle completo de una OC por código."""
+        return self._fetch_oc_detail(codigo)
+
     # ───────────── Método público: extracción RÁPIDA ────────────── #
 
     def extract_fast(self, fecha: date) -> list[dict[str, Any]]:

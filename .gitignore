@@ -24,6 +24,8 @@ Thumbs.db
 # Datos locales - la BD se genera con main.py (no se versiona)
 auditoria_estado.db
 compras.db
+data/
+docker-compose.override.yml
 *.db-journal
 
 # Archivos temporales de test

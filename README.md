@@ -20,10 +20,11 @@ Plataforma open source que extrae, procesa y analiza órdenes de compra del Merc
 
 | Módulo | Estado | Descripción |
 |---|---|---|
-| ETL Mercado Público | **Estable** | Extracción diaria de OC vía API ChileCompra, procesamiento a SQLite |
+| Pipeline diario (Railway cron / GitHub Actions) | **Operativo** | `daily_update.py --full` con catch-up, resync, SERVEL, CGR |
+| ETL Mercado Público | **Estable** | OC con organismo real, moneda CLP, re-sync automático |
 | Dashboard Streamlit | **Estable** | Panel con KPIs, gráficos, filtros por fecha, tabla de alertas |
 | Detector estadístico | **Estable** | Benford, Z-score, IQR, concentración, trato directo |
-| Asistente IA (DeepSeek) | **Experimental** | Chat con búsqueda web + consulta local a DB. Requiere API key |
+| Asistente IA (Conan / DeepSeek) | **Operativo** | Chat con 11 herramientas forenses + confianza [ALTA/MEDIA/BAJA] |
 | Notificador Telegram | **Experimental** | Envío de alertas automáticas. Requiere bot token |
 | Cruce SERVEL (donaciones) | **Operativo** | Carga CSV real desde servel.cl, cruce con proveedores activo |
 | Cruce malla societaria | **Pendiente** | Lógica implementada, requiere scraper real del Diario Oficial |
@@ -60,22 +61,12 @@ TELEGRAM_CHAT_ID=tu_chat_id
 ### Uso
 
 ```bash
-# Primera ejecución: crea la BD y extrae datos reales
+# Docker (recomendado)
+cp .env.example .env
+docker compose up -d --build
+
+# Sin Docker
 py main.py
-
-# Extraer con límite custom
-py main.py --max-oc 1000          # Máximo 1000 OC
-py main.py --max-oc 0             # Sin límite
-
-# Backfill multi-día
-py main.py --rango-fechas 01042026-07042026
-
-# Backup de la base de datos
-py backup.py                      # Crear backup
-py backup.py --list               # Ver backups
-py backup.py --restore backups/archivo.db
-
-# Lanzar dashboard
 streamlit run dashboard.py
 ```
 

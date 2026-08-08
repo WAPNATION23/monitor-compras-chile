@@ -1,0 +1,6 @@
+# Producción: reemplazar dominio y descomentar email para TLS automático.
+# Uso: docker compose --profile production up -d
+
+{$OJO_DOMAIN:monitor.wapnation.cl} {
+    reverse_proxy web:8501
+}

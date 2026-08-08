@@ -54,6 +54,15 @@ class CrossReferencer:
             )
         if not df.empty:
             df["fecha_creacion"] = pd.to_datetime(df["fecha_creacion"], errors="coerce")
+            # Monto normalizado en CLP (Fase 1)
+            if "monto_total_item_clp" in df.columns:
+                df["monto_total_item"] = df["monto_total_item_clp"].fillna(
+                    df["monto_total_item"]
+                )
+            # Organismo real preferido sobre unidad genérica
+            if "nombre_organismo" in df.columns:
+                mask_org = df["nombre_organismo"].notna() & (df["nombre_organismo"] != "")
+                df.loc[mask_org, "nombre_comprador"] = df.loc[mask_org, "nombre_organismo"]
         return df
 
     # ═══════════ CRUCE 1: Concentración de Capital ═══════════ #

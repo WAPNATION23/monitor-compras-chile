@@ -47,8 +47,12 @@ _MARKER_PATH = _BASE / "last_update.json"
 SCHEDULE_INTERVAL_HOURS = 24   # cada cuánto se ejecuta cuando todo está al día
 CHECK_INTERVAL_SECONDS = 3600  # cada cuánto despierta el daemon para chequear
 STALE_THRESHOLD_HOURS = 18     # si pasó más que esto desde la última corrida, corre
-EXTRACT_OC_MAX = int(os.getenv("DAILY_UPDATE_MAX_OC", "1000"))
+EXTRACT_OC_MAX = int(os.getenv("DAILY_UPDATE_MAX_OC", "5000"))
 EXTRACT_LIC_LIMIT = int(os.getenv("DAILY_UPDATE_MAX_LIC", "500"))
+CATCHUP_MAX_DAYS = int(os.getenv("CATCHUP_MAX_DAYS", "14"))
+RESYNC_RECENT_DAYS = int(os.getenv("RESYNC_RECENT_DAYS", "30"))
+RESYNC_MAX_OCS = int(os.getenv("RESYNC_MAX_OCS", "200"))
+SERVEL_REFRESH_DAYS = int(os.getenv("SERVEL_REFRESH_DAYS", "7"))
 
 # Lock global anti-reentrancia
 _scheduler_thread: threading.Thread | None = None
@@ -208,9 +212,198 @@ def update_licitaciones(fecha: date) -> dict[str, Any]:
     }
 
 
+def get_latest_oc_date() -> date | None:
+    """Última fecha de OC en la BD (aprox.)."""
+    try:
+        with sqlite3.connect(DB_NAME) as conn:
+            row = conn.execute(
+                "SELECT MAX(substr(fecha_creacion, 1, 10)) FROM ordenes_items"
+            ).fetchone()
+        if not row or not row[0]:
+            return None
+        return datetime.strptime(str(row[0])[:10], "%Y-%m-%d").date()
+    except (sqlite3.Error, ValueError):
+        return None
+
+
+def _first_gap_day(since: date, until: date) -> date | None:
+    """Primer día hábil sin filas entre since y until (inclusive)."""
+    d = since
+    with sqlite3.connect(DB_NAME) as conn:
+        while d <= until:
+            cnt = conn.execute(
+                "SELECT COUNT(*) FROM ordenes_items WHERE substr(fecha_creacion, 1, 10) = ?",
+                (d.isoformat(),),
+            ).fetchone()[0]
+            if cnt == 0:
+                return d
+            d += timedelta(days=1)
+    return None
+
+
+def catch_up_orders(max_days: int | None = None) -> dict[str, Any]:
+    """Recupera días faltantes (incluso si hay huecos en el medio)."""
+    max_days = max_days if max_days is not None else CATCHUP_MAX_DAYS
+    ayer = date.today() - timedelta(days=1)
+    latest = get_latest_oc_date()
+
+    if latest is None:
+        start = ayer - timedelta(days=min(3, max_days))
+    else:
+        # Buscar huecos desde el día siguiente al mínimo razonable
+        scan_from = min(latest, ayer) - timedelta(days=max_days)
+        if scan_from < date(2018, 1, 1):
+            scan_from = date(2018, 1, 1)
+        gap = _first_gap_day(scan_from, ayer)
+        if gap is None:
+            return {"skipped": True, "reason": "sin días pendientes", "latest": latest.isoformat() if latest else None}
+        start = gap
+
+    dias: list[date] = []
+    d = start
+    while d <= ayer and len(dias) < max_days:
+        dias.append(d)
+        d += timedelta(days=1)
+
+    results = []
+    total_inserted = 0
+    for dia in dias:
+        try:
+            r = update_orders(dia, max_oc=EXTRACT_OC_MAX)
+            total_inserted += r.get("items_insertados", 0)
+            results.append(r)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Catch-up falló %s: %s", dia, exc)
+            results.append({"fecha": dia.isoformat(), "error": str(exc)})
+
+    return {
+        "dias_procesados": len(dias),
+        "desde": dias[0].isoformat() if dias else None,
+        "hasta": dias[-1].isoformat() if dias else None,
+        "items_insertados_total": total_inserted,
+        "detalle": results,
+    }
+
+
+def resync_recent_orders(days: int | None = None, max_ocs: int | None = None) -> dict[str, Any]:
+    """Re-descarga OCs recientes para corregir montos, organismos y moneda."""
+    from extractor import MercadoPublicoExtractor
+    from processor import DataProcessor
+
+    days = days if days is not None else RESYNC_RECENT_DAYS
+    max_ocs = max_ocs if max_ocs is not None else RESYNC_MAX_OCS
+    cutoff = (date.today() - timedelta(days=days)).isoformat()
+
+    with sqlite3.connect(DB_NAME) as conn:
+        rows = conn.execute(
+            """
+            SELECT DISTINCT codigo_oc FROM ordenes_items
+            WHERE substr(fecha_creacion, 1, 10) >= ?
+            ORDER BY fecha_creacion DESC
+            LIMIT ?
+            """,
+            (cutoff, max_ocs),
+        ).fetchall()
+    codigos = [r[0] for r in rows if r[0]]
+    if not codigos:
+        return {"skipped": True, "reason": "sin OCs recientes"}
+
+    extractor = MercadoPublicoExtractor()
+    processor = DataProcessor()
+    ordenes: list[dict[str, Any]] = []
+    errores = 0
+    for codigo in codigos:
+        try:
+            detail = extractor.fetch_oc_detail(codigo)
+            if detail:
+                ordenes.append(detail)
+        except Exception as exc:  # noqa: BLE001
+            errores += 1
+            logger.debug("Resync OC %s: %s", codigo, exc)
+
+    ocs_ok, items = processor.refresh_orders(ordenes)
+    return {
+        "ocs_solicitadas": len(codigos),
+        "ocs_refrescadas": ocs_ok,
+        "items_actualizados": items,
+        "errores_api": errores,
+    }
+
+
+def update_secondary_sources(force: bool = False) -> dict[str, Any]:
+    """SERVEL, CGR e InfoProbidad — fuentes que no corrían en el pipeline diario."""
+    stats: dict[str, Any] = {}
+    marker = read_marker()
+    last_servel = marker.get("servel_utc", "")
+
+    # SERVEL — semanal
+    run_servel = force
+    if not run_servel and last_servel:
+        try:
+            ts = datetime.fromisoformat(last_servel)
+            run_servel = (datetime.now(timezone.utc) - ts).days >= SERVEL_REFRESH_DAYS
+        except ValueError:
+            run_servel = True
+    else:
+        run_servel = True
+
+    if run_servel:
+        try:
+            from cargar_servel_auto import main as servel_main
+            from cargar_gastos_servel import main as gastos_main
+
+            servel_main()
+            gastos_main()
+            stats["servel"] = {"ok": True}
+            marker["servel_utc"] = datetime.now(timezone.utc).isoformat()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Error cargando SERVEL: %s", exc)
+            stats["servel"] = {"error": str(exc)}
+    else:
+        stats["servel"] = {"skipped": True}
+
+    try:
+        from contraloria_connector import ContraloriaConnector
+
+        cgr = ContraloriaConnector(DB_NAME)
+        fisc = cgr.obtener_fiscalizaciones()
+        n_f = cgr.guardar_fiscalizaciones(fisc) if fisc else 0
+        informes = cgr.obtener_informes_destacados()
+        n_i = cgr.guardar_informes(informes) if informes else 0
+        stats["cgr"] = {"fiscalizaciones": n_f, "informes": n_i}
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Error CGR: %s", exc)
+        stats["cgr"] = {"error": str(exc)}
+
+    try:
+        from infoprobidad_connector import InfoProbidadConnector
+
+        ip = InfoProbidadConnector(DB_NAME)
+        stats["infoprobidad"] = {"mode": "live_on_demand", "endpoint": "datos.cplt.cl/sparql"}
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Error InfoProbidad: %s", exc)
+        stats["infoprobidad"] = {"error": str(exc)}
+
+    try:
+        from case_review import init_review_tables
+
+        init_review_tables(DB_NAME)
+        stats["case_review"] = {"tables": "ok"}
+    except Exception as exc:  # noqa: BLE001
+        stats["case_review"] = {"error": str(exc)}
+
+    _write_marker({**marker, **stats})
+    return stats
+
+
 # ─────────────────────────── update_all ────────────────────────────
 
-def update_all(fecha: date | None = None, *, force: bool = False) -> dict[str, Any]:
+def update_all(
+    fecha: date | None = None,
+    *,
+    force: bool = False,
+    full: bool = False,
+) -> dict[str, Any]:
     """
     Pipeline completo de actualización. Idempotente vía dedupe en SQLite.
 
@@ -246,6 +439,13 @@ def update_all(fecha: date | None = None, *, force: bool = False) -> dict[str, A
             "fecha_objetivo": fecha.isoformat(),
         }
 
+        # Catch-up PRIMERO (antes de insertar ayer, para no saltarse huecos)
+        if full:
+            try:
+                stats["catch_up"] = catch_up_orders()
+            except Exception as exc:  # noqa: BLE001
+                stats["catch_up"] = {"error": str(exc)}
+
         try:
             stats["ordenes"] = update_orders(fecha, max_oc=EXTRACT_OC_MAX)
         except Exception as exc:  # noqa: BLE001
@@ -257,6 +457,16 @@ def update_all(fecha: date | None = None, *, force: bool = False) -> dict[str, A
         except Exception as exc:  # noqa: BLE001
             logger.exception("Error update_licitaciones")
             stats["licitaciones"] = {"error": str(exc)}
+
+        if full:
+            try:
+                stats["resync"] = resync_recent_orders()
+            except Exception as exc:  # noqa: BLE001
+                stats["resync"] = {"error": str(exc)}
+            try:
+                stats["secondary"] = update_secondary_sources(force=force)
+            except Exception as exc:  # noqa: BLE001
+                stats["secondary"] = {"error": str(exc)}
 
         stats["completed_utc"] = datetime.now(timezone.utc).isoformat()
         _write_marker(stats)
@@ -299,6 +509,11 @@ def start_background_scheduler() -> bool:
         logger.info("[scheduler] deshabilitado por DISABLE_AUTO_UPDATE")
         return False
 
+    # En producción (Railway cron / GitHub Actions) desactivar con DISABLE_STREAMLIT_SCHEDULER=1
+    if os.getenv("DISABLE_STREAMLIT_SCHEDULER", "").strip() in ("1", "true", "yes"):
+        logger.info("[scheduler] deshabilitado — usar Railway cron o GitHub Actions")
+        return False
+
     global _scheduler_thread
     if _scheduler_thread is not None and _scheduler_thread.is_alive():
         return True
@@ -320,6 +535,11 @@ def _parse_cli() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Actualización diaria de Ojo del Pueblo")
     p.add_argument("--fecha", help="Fecha objetivo ddmmaaaa (default: ayer)")
     p.add_argument("--force", action="store_true", help="Forzar aunque esté al día")
+    p.add_argument(
+        "--full",
+        action="store_true",
+        help="Pipeline completo: catch-up + resync + SERVEL/CGR/InfoProbidad",
+    )
     return p.parse_args()
 
 
@@ -332,7 +552,7 @@ def main() -> None:
     fecha = None
     if args.fecha:
         fecha = datetime.strptime(args.fecha, "%d%m%Y").date()
-    stats = update_all(fecha=fecha, force=args.force)
+    stats = update_all(fecha=fecha, force=args.force, full=args.full)
     print(json.dumps(stats, indent=2, ensure_ascii=False, default=str))
 
 

@@ -1,0 +1,70 @@
+# Ojo del Pueblo — stack Docker
+# Uso: cp .env.example .env && docker compose up -d --build
+
+name: ojo-pueblo
+
+services:
+  web:
+    build: .
+    image: ojo-pueblo:latest
+    container_name: ojo-web
+    ports:
+      - "${OJO_WEB_PORT:-8501}:8501"
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      OJO_DATA_DIR: /data
+      DISABLE_STREAMLIT_SCHEDULER: "1"
+    volumes:
+      - ojo-data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8501/_stcore/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
+
+  cron:
+    build: .
+    image: ojo-pueblo:latest
+    container_name: ojo-cron
+    entrypoint: ["/usr/local/bin/supercronic"]
+    command: ["/app/docker/crontab"]
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      OJO_DATA_DIR: /data
+    volumes:
+      - ojo-data:/data
+    restart: unless-stopped
+    depends_on:
+      web:
+        condition: service_healthy
+
+  # Proxy TLS opcional (VPS con dominio). Perfil: production
+  caddy:
+    profiles: ["production"]
+    image: caddy:2-alpine
+    container_name: ojo-caddy
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      OJO_DOMAIN: ${OJO_DOMAIN:-monitor.wapnation.cl}
+    volumes:
+      - ./docker/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      web:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  ojo-data:
+    name: ojo-pueblo-data
+  caddy-data:
+  caddy-config:

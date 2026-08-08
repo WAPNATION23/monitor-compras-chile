@@ -1,0 +1,2 @@
+# 07:00 UTC = 04:00 Chile — pipeline completo de datos
+0 7 * * * cd /app && python daily_update.py --full --force >> /data/cron.log 2>&1

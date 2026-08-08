@@ -26,6 +26,8 @@ def test_db(tmp_path):
     df.to_sql("ordenes_items", conn, if_exists="append", index=False)
     conn.commit()
     conn.close()
+    from processor import DataProcessor
+    DataProcessor(db_path=db_path)  # aplica migraciones de esquema
     return db_path
 
 
@@ -78,6 +80,35 @@ class TestProcessor:
         assert rows[0]["precio_unitario"] == 1000
         assert rows[0]["monto_total_item"] == 10000
         assert rows[1]["precio_unitario"] == 2000
+
+    def test_flatten_oc_nombre_organismo_y_moneda(self):
+        from processor import DataProcessor
+        oc = {
+            "Codigo": "TEST-002-SE26",
+            "CodigoEstado": 6,
+            "TipoMoneda": "CLP",
+            "Total": 11900,
+            "FechaCreacion": "2026-03-15",
+            "Comprador": {
+                "RutUnidad": "61.602.000-0",
+                "NombreUnidad": "Bienes y Servicios",
+                "NombreOrganismo": "HOSPITAL SAN JUAN DE DIOS",
+            },
+            "Proveedor": {"RutSucursal": "76.111.222-3", "Nombre": "PROVEEDOR TEST"},
+            "Items": {
+                "Cantidad": 1,
+                "Listado": [
+                    {"Producto": "PRODUCTO A", "Cantidad": 10, "PrecioNeto": 1000, "Categoria": "Test"},
+                ],
+            },
+        }
+        rows = DataProcessor._flatten_oc(oc)
+        assert rows[0]["nombre_comprador"] == "HOSPITAL SAN JUAN DE DIOS"
+        assert rows[0]["nombre_unidad"] == "Bienes y Servicios"
+        assert rows[0]["nombre_organismo"] == "HOSPITAL SAN JUAN DE DIOS"
+        assert rows[0]["tipo_moneda"] == "CLP"
+        assert rows[0]["monto_total_oc"] == 11900
+        assert rows[0]["monto_total_item_clp"] == 10000
 
     def test_process_and_store(self, tmp_path):
         from processor import DataProcessor

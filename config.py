@@ -54,7 +54,9 @@ if not API_TICKET:
 
 # ──────────────────────────── Base de datos ────────────────────────────────── #
 _BASE_DIR = Path(__file__).resolve().parent
-DB_NAME: str = str(_BASE_DIR / "auditoria_estado.db")
+# En Docker montar volumen en /data y setear OJO_DATA_DIR=/data
+_DATA_DIR = Path(os.getenv("OJO_DATA_DIR", str(_BASE_DIR)))
+DB_NAME: str = str(_DATA_DIR / "auditoria_estado.db")
 
 # ──────────────────────────── Parámetros de Red ────────────────────────────── #
 REQUEST_TIMEOUT: int = 30          # segundos
@@ -80,6 +82,20 @@ PROV_NUEVO_DIAS: int = 30                  # Proveedor con primera OC hace <N d�
 PROV_NUEVO_MIN_MONTO: int = 20_000_000     # Y ya factura más de este monto => shell sospechosa
 DAILY_QUERY_LIMIT: int = 20               # Consultas IA por día por IP
 
+# ───────────────────── Pipeline / despliegue ─────────────────────────────── #
+# Tope diario de OC vía API (0 = sin límite). En Railway cron usar 5000+.
+DAILY_UPDATE_MAX_OC: int = int(os.getenv("DAILY_UPDATE_MAX_OC", "5000"))
+# Días máximos de catch-up automático cuando la BD quedó desactualizada
+CATCHUP_MAX_DAYS: int = int(os.getenv("CATCHUP_MAX_DAYS", "14"))
+# Re-sincronizar OCs recientes (corrige montos/organismos desactualizados)
+RESYNC_RECENT_DAYS: int = int(os.getenv("RESYNC_RECENT_DAYS", "30"))
+RESYNC_MAX_OCS: int = int(os.getenv("RESYNC_MAX_OCS", "200"))
+# Búsqueda web IA: tavily > brave > duckduckgo
+TAVILY_API_KEY: str = os.getenv("TAVILY_API_KEY", "")
+BRAVE_SEARCH_API_KEY: str = os.getenv("BRAVE_SEARCH_API_KEY", "")
+# IVA Chile para mostrar total bruto CLP cuando la API entrega neto
+IVA_CHILE: float = 1.19
+
 # ────────────────────── Notificaciones Telegram ───────────────────────────── #
 # Crear un bot con @BotFather y pegar el token aquí.
 # Para obtener el chat_id, envía un mensaje al bot y consulta:
@@ -89,7 +105,8 @@ TELEGRAM_BOT_TOKEN: str = os.getenv("TELEGRAM_TOKEN", "")
 TELEGRAM_CHAT_ID: str = os.getenv("TELEGRAM_CHAT_ID", "")
 
 # ─────────────────── Link directo a OC en Mercado Público ─────────────────── #
-MERCADO_PUBLICO_OC_URL: str = "https://www.mercadopublico.cl/Procurement/Modules/RFB/DetailsAcquisition.aspx?qs="
+# Ficha pública del buscador ChileCompra (abre el detalle oficial de la OC).
+MERCADO_PUBLICO_OC_URL: str = "https://buscador.mercadopublico.cl/ficha?code="
 
 # ──────────────── Clasificación Automática de Riesgo ──────────────────────── #
 # Palabras clave en nombre_comprador para clasificar categoría de riesgo

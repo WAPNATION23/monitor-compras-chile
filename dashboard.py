@@ -33,7 +33,12 @@ from chat_service import (
     build_db_context, build_web_context, call_deepseek,
     classify_intent, build_forensic_context, generate_case_summary,
 )
-from config import DAILY_QUERY_LIMIT, OC_TIPO_TRATO_DIRECTO, DB_NAME
+from config import (
+    DAILY_QUERY_LIMIT,
+    OC_TIPO_TRATO_DIRECTO,
+    DB_NAME,
+    MERCADO_PUBLICO_OC_URL,
+)
 from alertas_personas import AlertasPersonas
 
 logger = logging.getLogger(__name__)
@@ -1428,6 +1433,61 @@ def _render_tab_cruces(df_filtrado, total_proveedores, total_compradores, n_trat
 
 
 
+def _render_oc_detalle(codigo_oc: str, df_filtrado: pd.DataFrame) -> None:
+    """Muestra ficha local de una OC + enlace a Mercado Público."""
+    codigo = codigo_oc.strip()
+    url_mp = f"{MERCADO_PUBLICO_OC_URL}{urllib.parse.quote(codigo, safe='')}"
+
+    mask = df_filtrado['codigo_oc'].astype(str).str.lower() == codigo.lower()
+    items = df_filtrado[mask].copy()
+    if items.empty:
+        # Buscar en BD completa por si el filtro de sidebar la ocultó
+        try:
+            conn = sqlite3.connect(DB_NAME)
+            items = pd.read_sql_query(
+                "SELECT * FROM ordenes_items WHERE LOWER(codigo_oc) = LOWER(?) LIMIT 200",
+                conn,
+                params=(codigo,),
+            )
+            conn.close()
+        except (OSError, sqlite3.Error, pd.errors.DatabaseError) as exc:
+            st.warning(f"No se pudo consultar la BD: {exc}")
+            items = pd.DataFrame()
+
+    with st.container(border=True):
+        st.markdown(f"**Orden de compra:** `{codigo}`")
+        st.link_button("Abrir ficha oficial en Mercado Público", url_mp, use_container_width=True)
+
+        if items.empty:
+            st.info(
+                "Esta OC no está en la base local (aún no descargada o fuera de filtros). "
+                "Usa el botón de arriba para verla en Mercado Público."
+            )
+            return
+
+        comprador = items.iloc[0].get('nombre_organismo') or items.iloc[0].get('nombre_comprador', '—')
+        proveedor = items.iloc[0].get('nombre_proveedor', '—')
+        rut_prov = items.iloc[0].get('rut_proveedor', '—')
+        tipo = items.iloc[0].get('tipo_oc', '—')
+        estado = items.iloc[0].get('estado', '—')
+        monto_col = 'monto_total_item_clp' if 'monto_total_item_clp' in items.columns else 'monto_total_item'
+        total = pd.to_numeric(items[monto_col], errors='coerce').fillna(0).sum()
+
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Tipo", str(tipo))
+        c2.metric("Estado", str(estado))
+        c3.metric("Ítems", f"{len(items)}")
+        c4.metric("Monto total", format_clp(total))
+
+        st.markdown(f"**Comprador:** {comprador}  \n**Proveedor:** {proveedor} (`{rut_prov}`)")
+
+        cols_item = [c for c in [
+            'nombre_producto', 'cantidad', 'precio_unitario',
+            'monto_total_item', 'monto_total_item_clp', 'tipo_moneda',
+        ] if c in items.columns]
+        st.dataframe(items[cols_item], use_container_width=True, hide_index=True, height=280)
+
+
 def _render_tab_datos(df_filtrado, filtro_global):
     st.markdown(
         '<div class="section-header">'
@@ -1442,6 +1502,25 @@ def _render_tab_datos(df_filtrado, filtro_global):
     sub_oc, sub_lic = st.tabs(["Órdenes de Compra", "Licitaciones Públicas"])
 
     with sub_oc:
+        st.markdown("##### Ver detalle de una OC")
+        col_buscar, col_btn = st.columns([3, 1])
+        with col_buscar:
+            codigo_detalle = st.text_input(
+                "Código OC",
+                placeholder="ej. 1057-123-SE26",
+                key="oc_detalle_codigo",
+                label_visibility="collapsed",
+            )
+        with col_btn:
+            ver_detalle = st.button("Abrir ficha", use_container_width=True, key="oc_detalle_btn")
+
+        if ver_detalle:
+            codigo_limpio = (codigo_detalle or "").strip()
+            if codigo_limpio:
+                _render_oc_detalle(codigo_limpio, df_filtrado)
+            else:
+                st.warning("Ingresa un código de OC para ver el detalle.")
+
         if not df_filtrado.empty:
             mostrar_col = [
                 'codigo_oc', 'tipo_oc', 'categoria_riesgo', 'nombre_comprador',
@@ -1453,14 +1532,20 @@ def _render_tab_datos(df_filtrado, filtro_global):
             if pd.api.types.is_datetime64_any_dtype(dt_display['fecha_creacion']):
                 dt_display['fecha_creacion'] = dt_display['fecha_creacion'].dt.strftime('%Y-%m-%d')
 
-            # Botón de descarga
-            csv_oc = dt_display.to_csv(index=False).encode('utf-8')
+            # Link clickeable a la ficha oficial en Mercado Público
+            dt_display['ficha_mp'] = dt_display['codigo_oc'].map(
+                lambda c: f"{MERCADO_PUBLICO_OC_URL}{urllib.parse.quote(str(c), safe='')}"
+                if pd.notna(c) and str(c).strip() else ""
+            )
+
+            csv_oc = dt_display.drop(columns=['ficha_mp']).to_csv(index=False).encode('utf-8')
             st.download_button(
                 "Descargar OC (CSV)", csv_oc,
                 file_name=f"ordenes_compra_{datetime.now().strftime('%Y%m%d')}.csv",
                 mime="text/csv"
             )
 
+            st.caption("Clic en **Ver en MP** abre la ficha oficial de esa orden en Mercado Público.")
             st.dataframe(
                 dt_display,
                 use_container_width=True,
@@ -1468,6 +1553,11 @@ def _render_tab_datos(df_filtrado, filtro_global):
                 hide_index=True,
                 column_config={
                     "codigo_oc": st.column_config.TextColumn("Código OC"),
+                    "ficha_mp": st.column_config.LinkColumn(
+                        "Ficha",
+                        display_text="Ver en MP",
+                        help="Abrir detalle oficial en Mercado Público",
+                    ),
                     "tipo_oc": st.column_config.TextColumn("Tipo"),
                     "categoria_riesgo": st.column_config.TextColumn("Nivel Riesgo"),
                     "nombre_comprador": st.column_config.TextColumn("Entidad de Gobierno"),
@@ -1910,7 +2000,7 @@ def _run_forensic_pipeline(effective_prompt: str) -> tuple[str, list[str]]:
     detected = ", ".join(intent_labels.get(i, i) for i in intents)
     st.write(f"🎯 Intención detectada: **{detected}**")
 
-    st.write("🔍 Ejecutando herramientas forenses (SERVEL, CGR, InfoLobby, DIPRES)…")
+    st.write("🔍 Ejecutando herramientas forenses (SERVEL, CGR, InfoProbidad, Licitaciones, datos.gob)…")
     forensic_context, tools_used = build_forensic_context(effective_prompt)
 
     st.write("📊 Escaneando base de datos local (54.684 órdenes de compra)…")

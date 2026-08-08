@@ -1572,3 +1572,92 @@ class TestXSSProtection:
         malicious_url = "javascript:alert(document.cookie)"
         is_safe = malicious_url.startswith(("http://", "https://"))
         assert not is_safe
+
+
+# ══════════════════════════════════════════════
+# Tests: catch-up BD vacía
+# ══════════════════════════════════════════════
+
+class TestCatchUpEmptyDb:
+    """BD sin OCs debe respetar CATCHUP_MAX_DAYS, no hardcodear 3 días."""
+
+    def test_empty_db_uses_full_max_days(self, monkeypatch):
+        import daily_update as du
+        from datetime import date, timedelta
+
+        called_dates: list[date] = []
+
+        monkeypatch.setattr(du, "get_latest_oc_date", lambda: None)
+
+        def fake_update(fecha, max_oc=None):
+            called_dates.append(fecha)
+            return {"fecha": fecha.isoformat(), "items_insertados": 0}
+
+        monkeypatch.setattr(du, "update_orders", fake_update)
+
+        result = du.catch_up_orders(max_days=14)
+        ayer = date.today() - timedelta(days=1)
+
+        assert result["dias_procesados"] == 14
+        assert len(called_dates) == 14
+        assert called_dates[0] == ayer - timedelta(days=13)
+        assert called_dates[-1] == ayer
+        assert result["desde"] == called_dates[0].isoformat()
+        assert result["hasta"] == called_dates[-1].isoformat()
+
+
+class TestSlowBackfill:
+    """Relleno lento respeta presupuesto y no re-pide OCs ya guardadas."""
+
+    def test_budget_stops_after_limit(self, monkeypatch, tmp_path):
+        import daily_update as du
+        from datetime import date, timedelta
+
+        monkeypatch.setattr(du, "_BACKFILL_STATE_PATH", tmp_path / "backfill_state.json")
+        monkeypatch.setattr(du, "_existing_oc_codes_for_date", lambda _f: set())
+
+        class FakeExtractor:
+            def extract_fast(self, fecha):
+                return [{"Codigo": f"OC-{fecha.isoformat()}-{i}"} for i in range(300)]
+
+        monkeypatch.setattr(
+            "extractor.MercadoPublicoExtractor",
+            lambda: FakeExtractor(),
+        )
+
+        calls: list[tuple[date, int]] = []
+
+        def fake_update(fecha, max_oc=None):
+            calls.append((fecha, max_oc))
+            return {"fecha": fecha.isoformat(), "ocs_extraidas": max_oc or 0, "items_insertados": max_oc or 0}
+
+        monkeypatch.setattr(du, "update_orders", fake_update)
+
+        result = du.slow_backfill(budget=500, horizon_days=30)
+        assert result["ocs_extraidas"] == 500
+        assert result["budget_restante"] == 0
+        assert sum(c[1] or 0 for c in calls) == 500
+        assert (tmp_path / "backfill_state.json").exists()
+
+    def test_extract_skips_existing_codes(self, monkeypatch):
+        from extractor import MercadoPublicoExtractor
+        from datetime import date
+
+        ext = MercadoPublicoExtractor(ticket="x")
+        monkeypatch.setattr(
+            ext,
+            "_fetch_oc_codes",
+            lambda _f: [{"Codigo": "A"}, {"Codigo": "B"}, {"Codigo": "C"}],
+        )
+        seen: list[str] = []
+
+        def fake_detail(codigo):
+            seen.append(codigo)
+            return {"Codigo": codigo}
+
+        monkeypatch.setattr(ext, "_fetch_oc_detail", fake_detail)
+        monkeypatch.setattr("extractor.time.sleep", lambda _x: None)
+
+        out = ext.extract(date(2026, 1, 1), max_oc=10, skip_codes={"A", "C"}, delay=0)
+        assert [o["Codigo"] for o in out] == ["B"]
+        assert seen == ["B"]

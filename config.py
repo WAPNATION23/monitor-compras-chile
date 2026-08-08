@@ -83,10 +83,15 @@ PROV_NUEVO_MIN_MONTO: int = 20_000_000     # Y ya factura más de este monto => 
 DAILY_QUERY_LIMIT: int = 20               # Consultas IA por día por IP
 
 # ───────────────────── Pipeline / despliegue ─────────────────────────────── #
-# Tope diario de OC vía API (0 = sin límite). En Railway cron usar 5000+.
+# Tope de OC por corrida en modo agresivo (BACKFILL_ENABLED=0)
 DAILY_UPDATE_MAX_OC: int = int(os.getenv("DAILY_UPDATE_MAX_OC", "5000"))
 # Días máximos de catch-up automático cuando la BD quedó desactualizada
 CATCHUP_MAX_DAYS: int = int(os.getenv("CATCHUP_MAX_DAYS", "14"))
+# Relleno lento (recomendado en Railway): ~500 OCs cada 12h → BD grande sin 429
+BACKFILL_ENABLED: bool = os.getenv("BACKFILL_ENABLED", "1").strip().lower() in ("1", "true", "yes")
+BACKFILL_OC_BUDGET: int = int(os.getenv("BACKFILL_OC_BUDGET", "500"))
+BACKFILL_HORIZON_DAYS: int = int(os.getenv("BACKFILL_HORIZON_DAYS", "180"))
+SCHEDULE_EVERY_HOURS: float = float(os.getenv("SCHEDULE_EVERY_HOURS", "12"))
 # Re-sincronizar OCs recientes (corrige montos/organismos desactualizados)
 RESYNC_RECENT_DAYS: int = int(os.getenv("RESYNC_RECENT_DAYS", "30"))
 RESYNC_MAX_OCS: int = int(os.getenv("RESYNC_MAX_OCS", "200"))

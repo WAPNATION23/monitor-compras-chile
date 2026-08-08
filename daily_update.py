@@ -43,16 +43,22 @@ logger = logging.getLogger(__name__)
 _BASE = Path(DB_NAME).resolve().parent
 _MARKER_PATH = _BASE / "last_update.json"
 
-# Configuración del scheduler
-SCHEDULE_INTERVAL_HOURS = 24   # cada cuánto se ejecuta cuando todo está al día
-CHECK_INTERVAL_SECONDS = 3600  # cada cuánto despierta el daemon para chequear
-STALE_THRESHOLD_HOURS = 18     # si pasó más que esto desde la última corrida, corre
+# Configuración del scheduler (SCHEDULE_EVERY_HOURS se define abajo con el resto de env)
+CHECK_INTERVAL_SECONDS = 1800  # despierta cada 30 min; decide si toca correr
+STALE_THRESHOLD_HOURS = 11     # con lote cada 12h, disparar un poco antes
 EXTRACT_OC_MAX = int(os.getenv("DAILY_UPDATE_MAX_OC", "5000"))
 EXTRACT_LIC_LIMIT = int(os.getenv("DAILY_UPDATE_MAX_LIC", "500"))
 CATCHUP_MAX_DAYS = int(os.getenv("CATCHUP_MAX_DAYS", "14"))
 RESYNC_RECENT_DAYS = int(os.getenv("RESYNC_RECENT_DAYS", "30"))
 RESYNC_MAX_OCS = int(os.getenv("RESYNC_MAX_OCS", "200"))
 SERVEL_REFRESH_DAYS = int(os.getenv("SERVEL_REFRESH_DAYS", "7"))
+# Relleno lento: evita 429 y construye BD grande a lo largo de semanas
+BACKFILL_ENABLED = os.getenv("BACKFILL_ENABLED", "1").strip().lower() in ("1", "true", "yes")
+BACKFILL_OC_BUDGET = int(os.getenv("BACKFILL_OC_BUDGET", "500"))
+BACKFILL_HORIZON_DAYS = int(os.getenv("BACKFILL_HORIZON_DAYS", "180"))
+# Scheduler embebido: cada cuántas horas intenta (12 = 2 lotes/día)
+SCHEDULE_EVERY_HOURS = float(os.getenv("SCHEDULE_EVERY_HOURS", "12"))
+_BACKFILL_STATE_PATH = _BASE / "backfill_state.json"
 
 # Lock global anti-reentrancia
 _scheduler_thread: threading.Thread | None = None
@@ -102,9 +108,10 @@ def hours_since_last_update() -> float | None:
 
 
 def is_update_due() -> bool:
-    """True si la última corrida fue hace > STALE_THRESHOLD_HOURS o nunca."""
+    """True si la última corrida fue hace > umbral o nunca."""
     h = hours_since_last_update()
-    return h is None or h > STALE_THRESHOLD_HOURS
+    threshold = max(STALE_THRESHOLD_HOURS, SCHEDULE_EVERY_HOURS - 1.0)
+    return h is None or h > threshold
 
 
 # ─────────────────── Storage: tabla licitaciones ───────────────────
@@ -169,6 +176,22 @@ def _store_licitaciones(licitaciones: list[dict[str, Any]]) -> int:
 
 # ─────────────────────── Updaters por fuente ───────────────────────
 
+def _existing_oc_codes_for_date(fecha: date) -> set[str]:
+    """Códigos OC ya persistidos para una fecha (evita gastar presupuesto en dupes)."""
+    try:
+        with sqlite3.connect(DB_NAME) as conn:
+            rows = conn.execute(
+                """
+                SELECT DISTINCT codigo_oc FROM ordenes_items
+                WHERE substr(fecha_creacion, 1, 10) = ?
+                """,
+                (fecha.isoformat(),),
+            ).fetchall()
+        return {r[0] for r in rows if r[0]}
+    except sqlite3.Error:
+        return set()
+
+
 def update_orders(fecha: date, max_oc: int | None = None) -> dict[str, Any]:
     """Extrae + procesa OCs de la fecha indicada. Retorna stats."""
     from extractor import MercadoPublicoExtractor
@@ -176,7 +199,10 @@ def update_orders(fecha: date, max_oc: int | None = None) -> dict[str, Any]:
 
     t0 = _time.perf_counter()
     extractor = MercadoPublicoExtractor()
-    kwargs = {"max_oc": max_oc} if max_oc else {}
+    skip = _existing_oc_codes_for_date(fecha)
+    kwargs: dict[str, Any] = {"skip_codes": skip}
+    if max_oc is not None:
+        kwargs["max_oc"] = max_oc
     ordenes = extractor.extract(fecha, **kwargs)
     n_oc = len(ordenes) if ordenes else 0
 
@@ -187,6 +213,7 @@ def update_orders(fecha: date, max_oc: int | None = None) -> dict[str, Any]:
     return {
         "fecha": fecha.isoformat(),
         "ocs_extraidas": n_oc,
+        "ocs_ya_en_bd": len(skip),
         "items_insertados": inserted,
         "duration_s": round(_time.perf_counter() - t0, 1),
     }
@@ -248,7 +275,8 @@ def catch_up_orders(max_days: int | None = None) -> dict[str, Any]:
     latest = get_latest_oc_date()
 
     if latest is None:
-        start = ayer - timedelta(days=min(3, max_days))
+        # BD vacía: respetar CATCHUP_MAX_DAYS (antes hardcodeaba 3 y perdía historial)
+        start = ayer - timedelta(days=max(0, max_days - 1))
     else:
         # Buscar huecos desde el día siguiente al mínimo razonable
         scan_from = min(latest, ayer) - timedelta(days=max_days)
@@ -282,6 +310,124 @@ def catch_up_orders(max_days: int | None = None) -> dict[str, Any]:
         "hasta": dias[-1].isoformat() if dias else None,
         "items_insertados_total": total_inserted,
         "detalle": results,
+    }
+
+
+def _read_backfill_state() -> dict[str, Any]:
+    try:
+        with open(_BACKFILL_STATE_PATH, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return {}
+
+
+def _write_backfill_state(payload: dict[str, Any]) -> None:
+    try:
+        _BACKFILL_STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
+        with open(_BACKFILL_STATE_PATH, "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False, indent=2)
+    except OSError as exc:
+        logger.warning("No se pudo escribir backfill_state: %s", exc)
+
+
+def slow_backfill(
+    budget: int | None = None,
+    horizon_days: int | None = None,
+) -> dict[str, Any]:
+    """
+    Rellena historial de a poco: máximo `budget` OCs por corrida (~500 / 12h).
+
+    Camina hacia atrás desde ayer dentro del horizonte, salta OCs ya en BD,
+    y guarda cursor para continuar en la siguiente ventana.
+    """
+    from extractor import MercadoPublicoExtractor
+
+    budget = budget if budget is not None else BACKFILL_OC_BUDGET
+    horizon_days = horizon_days if horizon_days is not None else BACKFILL_HORIZON_DAYS
+    if budget <= 0:
+        return {"skipped": True, "reason": "budget<=0"}
+
+    ayer = date.today() - timedelta(days=1)
+    scan_from = ayer - timedelta(days=max(0, horizon_days - 1))
+    if scan_from < date(2018, 1, 1):
+        scan_from = date(2018, 1, 1)
+
+    state = _read_backfill_state()
+    cursor_s = state.get("cursor_date")
+    try:
+        cursor = datetime.strptime(str(cursor_s)[:10], "%Y-%m-%d").date() if cursor_s else ayer
+    except ValueError:
+        cursor = ayer
+    if cursor < scan_from or cursor > ayer:
+        cursor = ayer
+
+    remaining = budget
+    detalle: list[dict[str, Any]] = []
+    total_oc = 0
+    total_items = 0
+    extractor = MercadoPublicoExtractor()
+
+    d = cursor
+    while remaining > 0 and d >= scan_from:
+        try:
+            listado = extractor.extract_fast(d)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Backfill listado falló %s: %s", d, exc)
+            detalle.append({"fecha": d.isoformat(), "error": str(exc)})
+            d -= timedelta(days=1)
+            continue
+
+        if not listado:
+            d -= timedelta(days=1)
+            continue
+
+        existentes = _existing_oc_codes_for_date(d)
+        pendientes = sum(1 for oc in listado if oc.get("Codigo") and oc["Codigo"] not in existentes)
+        if pendientes <= 0:
+            d -= timedelta(days=1)
+            continue
+
+        tomar = min(remaining, pendientes)
+        try:
+            r = update_orders(d, max_oc=tomar)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Backfill update falló %s: %s", d, exc)
+            detalle.append({"fecha": d.isoformat(), "error": str(exc)})
+            break
+
+        ocs = int(r.get("ocs_extraidas") or 0)
+        remaining -= ocs
+        total_oc += ocs
+        total_items += int(r.get("items_insertados") or 0)
+        r["pendientes_antes"] = pendientes
+        detalle.append(r)
+
+        # Si el día aún tiene pendientes, el cursor se queda ahí
+        if ocs < pendientes and remaining <= 0:
+            break
+        d -= timedelta(days=1)
+
+    next_cursor = max(d, scan_from)
+    _write_backfill_state({
+        "cursor_date": next_cursor.isoformat(),
+        "horizon_days": horizon_days,
+        "last_budget": budget,
+        "last_ocs": total_oc,
+        "updated_utc": datetime.now(timezone.utc).isoformat(),
+        "scan_from": scan_from.isoformat(),
+        "scan_to": ayer.isoformat(),
+    })
+
+    return {
+        "mode": "slow_backfill",
+        "budget": budget,
+        "ocs_extraidas": total_oc,
+        "items_insertados": total_items,
+        "budget_restante": max(0, remaining),
+        "cursor_next": next_cursor.isoformat(),
+        "horizon_days": horizon_days,
+        "detalle": detalle,
+        "done": total_oc == 0 and remaining == budget,
     }
 
 
@@ -433,24 +579,38 @@ def update_all(
             _write_marker(payload)
             return payload
 
-        logger.info("[daily_update] inicio - fecha=%s", fecha)
+        logger.info("[daily_update] inicio - fecha=%s backfill=%s", fecha, BACKFILL_ENABLED)
         stats: dict[str, Any] = {
             "ts_utc": datetime.now(timezone.utc).isoformat(),
             "fecha_objetivo": fecha.isoformat(),
+            "backfill_enabled": BACKFILL_ENABLED,
         }
 
-        # Catch-up PRIMERO (antes de insertar ayer, para no saltarse huecos)
-        if full:
+        # Modo agresivo (solo si backfill desactivado): catch-up multi-día
+        if full and not BACKFILL_ENABLED:
             try:
                 stats["catch_up"] = catch_up_orders()
             except Exception as exc:  # noqa: BLE001
                 stats["catch_up"] = {"error": str(exc)}
 
+        budget_left = BACKFILL_OC_BUDGET if BACKFILL_ENABLED else EXTRACT_OC_MAX
+        # Reservar parte del presupuesto para el día objetivo (datos frescos)
+        fresh_cap = min(200, budget_left) if BACKFILL_ENABLED else budget_left
         try:
-            stats["ordenes"] = update_orders(fecha, max_oc=EXTRACT_OC_MAX)
+            stats["ordenes"] = update_orders(fecha, max_oc=fresh_cap)
+            used = int(stats["ordenes"].get("ocs_extraidas") or 0)
+            if BACKFILL_ENABLED:
+                budget_left = max(0, budget_left - used)
         except Exception as exc:  # noqa: BLE001
             logger.exception("Error update_orders")
             stats["ordenes"] = {"error": str(exc)}
+
+        # Relleno lento del historial (500 OCs / ventana) → BD grande sin 429
+        if BACKFILL_ENABLED and budget_left > 0:
+            try:
+                stats["backfill"] = slow_backfill(budget=budget_left)
+            except Exception as exc:  # noqa: BLE001
+                stats["backfill"] = {"error": str(exc)}
 
         try:
             stats["licitaciones"] = update_licitaciones(fecha)
@@ -458,13 +618,19 @@ def update_all(
             logger.exception("Error update_licitaciones")
             stats["licitaciones"] = {"error": str(exc)}
 
-        if full:
+        if full and not BACKFILL_ENABLED:
             try:
                 stats["resync"] = resync_recent_orders()
             except Exception as exc:  # noqa: BLE001
                 stats["resync"] = {"error": str(exc)}
             try:
                 stats["secondary"] = update_secondary_sources(force=force)
+            except Exception as exc:  # noqa: BLE001
+                stats["secondary"] = {"error": str(exc)}
+        elif full and BACKFILL_ENABLED:
+            # En modo lento, fuentes secundarias ocasionales (no cada lote)
+            try:
+                stats["secondary"] = update_secondary_sources(force=False)
             except Exception as exc:  # noqa: BLE001
                 stats["secondary"] = {"error": str(exc)}
 
@@ -538,7 +704,18 @@ def _parse_cli() -> argparse.Namespace:
     p.add_argument(
         "--full",
         action="store_true",
-        help="Pipeline completo: catch-up + resync + SERVEL/CGR/InfoProbidad",
+        help="Pipeline completo: catch-up/backfill + fuentes secundarias",
+    )
+    p.add_argument(
+        "--backfill-only",
+        action="store_true",
+        help="Solo relleno lento (presupuesto BACKFILL_OC_BUDGET)",
+    )
+    p.add_argument(
+        "--budget",
+        type=int,
+        default=None,
+        help="OCs máximas en esta corrida (override BACKFILL_OC_BUDGET)",
     )
     return p.parse_args()
 
@@ -549,6 +726,10 @@ def main() -> None:
         format="%(asctime)s | %(levelname)-7s | %(name)s | %(message)s",
     )
     args = _parse_cli()
+    if args.backfill_only:
+        stats = slow_backfill(budget=args.budget)
+        print(json.dumps(stats, indent=2, ensure_ascii=False, default=str))
+        return
     fecha = None
     if args.fecha:
         fecha = datetime.strptime(args.fecha, "%d%m%Y").date()

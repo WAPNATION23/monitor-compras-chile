@@ -65,6 +65,19 @@ class MercadoPublicoExtractor:
             try:
                 logger.debug("GET %s (intento %d/%d)", url, attempt, MAX_RETRIES)
                 response = self.session.get(url, params=params, timeout=REQUEST_TIMEOUT)
+                if response.status_code == 429:
+                    # Rate limit oficial: esperar más que el backoff normal
+                    wait = max(15.0, RETRY_BACKOFF ** (attempt + 2))
+                    logger.warning(
+                        "HTTP 429 (intento %d/%d) — pausa %.0fs para no saturar API",
+                        attempt, MAX_RETRIES, wait,
+                    )
+                    time.sleep(wait)
+                    last_exception = requests.exceptions.HTTPError(
+                        f"429 Too Many Requests: {response.url}",
+                        response=response,
+                    )
+                    continue
                 response.raise_for_status()
                 return response.json()
             except requests.exceptions.RequestException as exc:
@@ -209,18 +222,20 @@ class MercadoPublicoExtractor:
         fecha: date,
         max_oc: int = MAX_OC_PER_RUN,
         delay: float = REQUEST_DELAY,
+        skip_codes: set[str] | None = None,
     ) -> list[dict[str, Any]]:
         """
         Pipeline completo: lista OC → descarga detalle de cada una.
 
         Con 18,000+ OC diarias, se limita a `max_oc` para no saturar la API.
-        Las OC se seleccionan priorizando las más recientes.
+        `skip_codes` evita re-descargar OCs ya persistidas (relleno gradual).
         La paginación por estado se aplica automáticamente si la API trunca.
 
         Args:
             fecha: Fecha de las órdenes de compra a extraer.
             max_oc: Máximo de OC a descargar en detalle (default: 200).
             delay: Segundos de espera entre cada request (default: 1.0).
+            skip_codes: códigos ya en BD (se omiten del presupuesto).
 
         Returns:
             Lista de dicts con el detalle completo de cada OC.
@@ -230,12 +245,25 @@ class MercadoPublicoExtractor:
         if not listado:
             return []
 
-        # Limitar la cantidad de OC a procesar (max_oc=0 → sin límite)
-        codigos: list[str] = [oc["Codigo"] for oc in listado if "Codigo" in oc]
+        skip = skip_codes or set()
+        codigos: list[str] = [
+            oc["Codigo"] for oc in listado
+            if oc.get("Codigo") and oc["Codigo"] not in skip
+        ]
+        omitidas = len(listado) - len(codigos)
+        if omitidas:
+            logger.info(
+                "Fecha %s: omitiendo %d OC ya en BD (%d pendientes).",
+                fecha.strftime("%d/%m/%Y"), omitidas, len(codigos),
+            )
 
+        if not codigos:
+            return []
+
+        # Limitar la cantidad de OC a procesar (max_oc=0 → sin límite)
         if max_oc > 0 and len(codigos) > max_oc:
             logger.info(
-                "Limitando a %d OC de %d disponibles (día %s).",
+                "Limitando a %d OC de %d pendientes (día %s).",
                 max_oc, len(codigos), fecha.strftime("%d/%m/%Y"),
             )
             codigos = codigos[:max_oc]

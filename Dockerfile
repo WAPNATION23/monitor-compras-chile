@@ -31,7 +31,8 @@ ENV OJO_DATA_DIR=/data \
 
 EXPOSE 8501
 
-USER ojo
+# Root en arranque: Railway monta volúmenes root-owned; entrypoint hace chown y baja a ojo.
+USER root
 
 ENTRYPOINT ["/app/docker/entrypoint.sh"]
 CMD ["web"]

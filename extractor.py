@@ -16,6 +16,7 @@ Maneja:
 from __future__ import annotations
 
 import logging
+import os
 import time
 from datetime import date
 from typing import Any
@@ -36,8 +37,9 @@ logger = logging.getLogger(__name__)
 # Máximo de OC a descargar en detalle por ejecución.
 # Con ~18,000 OC diarias y 1 req/seg, 5000 ≈ ~1.4 h. Usar --max-oc para ajustar.
 MAX_OC_PER_RUN: int = 5000
-# Delay entre requests individuales al API (segundos)
-REQUEST_DELAY: float = 1.0
+# Delay entre requests individuales al API (segundos).
+# Subir a 2.0–2.5 si hay muchos HTTP 429.
+REQUEST_DELAY: float = float(os.getenv("REQUEST_DELAY", "2.0"))
 
 
 class MercadoPublicoExtractor:

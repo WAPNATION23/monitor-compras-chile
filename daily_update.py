@@ -193,28 +193,71 @@ def _existing_oc_codes_for_date(fecha: date) -> set[str]:
 
 
 def update_orders(fecha: date, max_oc: int | None = None) -> dict[str, Any]:
-    """Extrae + procesa OCs de la fecha indicada. Retorna stats."""
-    from extractor import MercadoPublicoExtractor
+    """Extrae + procesa OCs de la fecha indicada. Persiste en lotes (anti-corte)."""
+    from extractor import MercadoPublicoExtractor, REQUEST_DELAY
     from processor import DataProcessor
 
     t0 = _time.perf_counter()
     extractor = MercadoPublicoExtractor()
     skip = _existing_oc_codes_for_date(fecha)
-    kwargs: dict[str, Any] = {"skip_codes": skip}
-    if max_oc is not None:
-        kwargs["max_oc"] = max_oc
-    ordenes = extractor.extract(fecha, **kwargs)
-    n_oc = len(ordenes) if ordenes else 0
+    delay = float(os.getenv("REQUEST_DELAY", str(REQUEST_DELAY)))
+    flush_every = max(1, int(os.getenv("BACKFILL_FLUSH_EVERY", "25")))
 
+    try:
+        listado = extractor.extract_fast(fecha)
+    except Exception as exc:  # noqa: BLE001
+        return {
+            "fecha": fecha.isoformat(),
+            "error": str(exc),
+            "ocs_extraidas": 0,
+            "ocs_ya_en_bd": len(skip),
+            "items_insertados": 0,
+            "duration_s": round(_time.perf_counter() - t0, 1),
+        }
+
+    codigos = [
+        oc["Codigo"] for oc in listado
+        if oc.get("Codigo") and oc["Codigo"] not in skip
+    ]
+    if max_oc is not None and max_oc > 0:
+        codigos = codigos[:max_oc]
+
+    processor = DataProcessor()
+    batch: list[dict[str, Any]] = []
+    n_oc = 0
     inserted = 0
-    if ordenes:
-        processor = DataProcessor()
-        _, inserted = processor.process_and_store(ordenes)
+    errores = 0
+
+    def _flush() -> None:
+        nonlocal inserted, batch
+        if not batch:
+            return
+        _, n = processor.process_and_store(batch)
+        inserted += n
+        batch = []
+
+    for i, codigo in enumerate(codigos, start=1):
+        detalle = extractor.fetch_oc_detail(codigo)
+        if detalle is not None:
+            batch.append(detalle)
+            n_oc += 1
+        else:
+            errores += 1
+        if len(batch) >= flush_every:
+            _flush()
+            logger.info(
+                "Flush parcial %s: %d/%d OC persistidas (%d errores)",
+                fecha.isoformat(), n_oc, len(codigos), errores,
+            )
+        _time.sleep(delay)
+
+    _flush()
     return {
         "fecha": fecha.isoformat(),
         "ocs_extraidas": n_oc,
         "ocs_ya_en_bd": len(skip),
         "items_insertados": inserted,
+        "errores": errores,
         "duration_s": round(_time.perf_counter() - t0, 1),
     }
 

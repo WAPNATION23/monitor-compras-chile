@@ -272,6 +272,36 @@ _CUSTOM_CSS: str = """
     .section-header .icon.purple { background: rgba(139, 92, 246, 0.15); }
     .section-header h3 { margin: 0 !important; font-size: 1rem; }
     .section-header p { margin: 0; color: #64748B; font-size: 0.78rem; }
+    .guide-box {
+        background: rgba(15, 23, 42, 0.75);
+        border: 1px solid rgba(59, 130, 246, 0.28);
+        border-left: 3px solid #3B82F6;
+        border-radius: 10px;
+        padding: 14px 16px;
+        margin: 0 0 18px 0;
+        font-size: 0.84rem;
+        line-height: 1.55;
+        color: #94A3B8;
+    }
+    .guide-box strong { color: #E2E8F0; font-weight: 600; }
+    .guide-box ul { margin: 8px 0 0 18px; padding: 0; }
+    .guide-box li { margin-bottom: 4px; }
+    .chart-note {
+        color: #64748B;
+        font-size: 0.76rem;
+        margin: -4px 0 10px 0;
+        line-height: 1.4;
+    }
+    .glossary-chip {
+        display: inline-block;
+        background: rgba(30, 41, 59, 0.7);
+        border: 1px solid rgba(51, 65, 85, 0.55);
+        border-radius: 6px;
+        padding: 2px 8px;
+        margin: 2px 4px 2px 0;
+        font-size: 0.72rem;
+        color: #94A3B8;
+    }
     .source-card {
         background: linear-gradient(135deg, rgba(15, 23, 42, 0.6) 0%, rgba(30, 41, 59, 0.3) 100%);
         border: 1px solid rgba(51, 65, 85, 0.4);
@@ -465,6 +495,40 @@ COLOR_DISCRETE_MAP = {
     "MOP/OBRAS": "#F59E0B",
     "GENERAL": "#6366F1"
 }
+
+def _guide_box(title: str, bullets: list[str]) -> None:
+    """Caja 'Cómo leer esto' — una idea clara por pestaña."""
+    items = "".join(f"<li>{html_mod.escape(b)}</li>" for b in bullets)
+    st.markdown(
+        f'<div class="guide-box"><strong>{html_mod.escape(title)}</strong>'
+        f'<ul>{items}</ul></div>',
+        unsafe_allow_html=True,
+    )
+
+
+def _chart_note(text: str) -> None:
+    """Leyenda corta bajo el título de un gráfico."""
+    st.markdown(
+        f'<p class="chart-note">{html_mod.escape(text)}</p>',
+        unsafe_allow_html=True,
+    )
+
+
+def _glossary_strip() -> None:
+    """Mini glosario de tipos de compra (siempre visible en General)."""
+    chips = [
+        ("TD / D1 / SE", "Trato directo — sin licitación pública"),
+        ("CM", "Convenio marco"),
+        ("AG / MC", "Compra ágil"),
+        ("LP", "Licitación pública"),
+        ("CLP", "Pesos chilenos"),
+    ]
+    html = " ".join(
+        f'<span class="glossary-chip"><b>{html_mod.escape(k)}</b> · {html_mod.escape(v)}</span>'
+        for k, v in chips
+    )
+    st.markdown(html, unsafe_allow_html=True)
+
 
 _CHART_LAYOUT = dict(
     paper_bgcolor="rgba(0,0,0,0)",
@@ -762,11 +826,17 @@ def _render_caso_destacado(df: pd.DataFrame):
 
 
 def _render_tab_general(df_filtrado, total_gasto, total_oc, total_proveedores, total_compradores, pct_td, n_trato_directo):
-    # Explicación clara del panel
-    st.markdown("""
-    > Este panel muestra **órdenes de compra** emitidas por organismos del Estado de Chile,
-    > obtenidas desde la API de Mercado Público (ChileCompra). Usa los filtros laterales para explorar.
-    """)
+    _guide_box(
+        "Cómo leer este panel",
+        [
+            "Los montos están en pesos chilenos (CLP) según los filtros del menú lateral.",
+            "«Sin licitación» agrupa tratos directos y compras sin proceso competitivo abierto.",
+            "El radar de colores: rojo = revisar ya · ámbar = vigilar · azul/verde = contexto.",
+            "Usa «Investigar» bajo un proveedor para mandarlo al asistente IA con un clic.",
+        ],
+    )
+    _glossary_strip()
+    st.markdown("")
 
     # KPIs Superiores
     kpi1, kpi2, kpi3, kpi4, kpi5 = st.columns(5)
@@ -923,6 +993,10 @@ def _render_tab_general(df_filtrado, total_gasto, total_oc, total_proveedores, t
 
     with col_g1:
         st.markdown("#### Top 10 proveedores por monto adjudicado")
+        _chart_note(
+            "Suma de ítems adjudicados (CLP) con los filtros actuales. "
+            "Un proveedor alto no implica irregularidad: mira % de trato directo y multi-organismo."
+        )
         if not df_filtrado.empty:
             top_prov = df_filtrado.groupby('nombre_proveedor')['monto_total_item'].sum().reset_index()
             top_prov = top_prov.nlargest(10, 'monto_total_item').sort_values('monto_total_item', ascending=True)
@@ -945,13 +1019,17 @@ def _render_tab_general(df_filtrado, total_gasto, total_oc, total_proveedores, t
                 textposition='outside', textfont_size=11, textfont_color="#CBD5E1",
                 hovertemplate='%{customdata[0]}<extra></extra>',
             )
-            fig_bar.update_xaxes(tickformat='~s', title_text='')
+            fig_bar.update_xaxes(tickformat='~s', title_text='Monto adjudicado (CLP)')
             st.plotly_chart(fig_bar, use_container_width=True)
         else:
             st.info("Sin datos suficientes.")
 
     with col_g2:
         st.markdown("#### Top 10 organismos por gasto")
+        _chart_note(
+            "Participación del gasto entre los 10 organismos que más compran en el filtro. "
+            "Pasa el mouse para ver el monto exacto."
+        )
         if not df_filtrado.empty:
             top_comp = df_filtrado.groupby('nombre_comprador')['monto_total_item'].sum().reset_index()
             top_comp = top_comp.nlargest(10, 'monto_total_item')
@@ -990,7 +1068,10 @@ def _render_tab_general(df_filtrado, total_gasto, total_oc, total_proveedores, t
 
     with col_g3:
         st.markdown("#### Distribución por tipo de compra")
-        st.caption("D1/C1 = Trato Directo · CM = Convenio Marco · AG = Compra Ágil · LP = Licitación")
+        _chart_note(
+            "D1/C1/SE ≈ trato directo · CM = convenio marco · AG/MC = compra ágil · LP = licitación. "
+            "Barras = monto total (CLP) por tipo."
+        )
         if not df_filtrado.empty:
             tipo_data = df_filtrado.groupby('tipo_oc').agg(
                 n_oc=('codigo_oc', 'nunique'),
@@ -1029,6 +1110,10 @@ def _render_tab_general(df_filtrado, total_gasto, total_oc, total_proveedores, t
 
     with col_g4:
         st.markdown("#### Evolución del gasto diario")
+        _chart_note(
+            "Suma diaria de ítems emitidos (fecha de creación de la OC). "
+            "Picos pueden ser días hábiles con muchas OC o pocas OC muy caras."
+        )
         if not df_filtrado.empty:
             df_time = df_filtrado.dropna(subset=['fecha_creacion']).copy()
             if not df_time.empty:
@@ -1044,8 +1129,8 @@ def _render_tab_general(df_filtrado, total_gasto, total_oc, total_proveedores, t
                     line=dict(width=2.5), fillcolor="rgba(59,130,246,0.12)",
                     hovertemplate='%{x|%d/%m/%Y}<br>$%{y:,.0f} CLP<extra></extra>',
                 )
-                fig_line.update_yaxes(tickformat='~s', title_text='')
-                fig_line.update_xaxes(tickformat='%d/%m/%y', title_text='')
+                fig_line.update_yaxes(tickformat='~s', title_text='Gasto del día (CLP)')
+                fig_line.update_xaxes(tickformat='%d/%m/%y', title_text='Fecha emisión')
                 st.plotly_chart(fig_line, use_container_width=True)
             else:
                 st.info("No hay fechas válidas.")
@@ -1054,6 +1139,10 @@ def _render_tab_general(df_filtrado, total_gasto, total_oc, total_proveedores, t
 
     # Fila 3: Alertas rápidas
     st.markdown("#### Órdenes de compra de mayor monto")
+    _chart_note(
+        "Top 5 ítems por monto en el filtro actual. Revisa el código OC en «Registro» "
+        "o ábrelo en Mercado Público para el detalle oficial."
+    )
     if not df_filtrado.empty:
         top5 = df_filtrado.nlargest(5, 'monto_total_item')[['codigo_oc', 'nombre_proveedor', 'rut_proveedor', 'nombre_comprador', 'monto_total_item', 'tipo_oc']].copy()
         top5['monto_total_item'] = top5['monto_total_item'].apply(format_clp)
@@ -1073,6 +1162,15 @@ def _render_tab_cruces(df_filtrado, total_proveedores, total_compradores, n_trat
         '<p>Detección de patrones de riesgo mediante cruce de bases de datos públicas</p></div>'
         '</div>',
         unsafe_allow_html=True,
+    )
+    _guide_box(
+        "Cómo leer los cruces",
+        [
+            "Cada bloque cruza compras con otra fuente pública (SERVEL, CGR, lobby, etc.).",
+            "Una coincidencia es una pista, no una condena: verifica en la fuente original.",
+            "Prioriza filas con alto monto + trato directo + vínculo político o fiscalización.",
+            "El reporte ejecutivo resume el panorama; los listados son la evidencia detallada.",
+        ],
     )
 
     try:
@@ -1496,6 +1594,15 @@ def _render_tab_datos(df_filtrado, filtro_global):
         f'<p>{len(df_filtrado):,} registros cargados</p></div>'
         '</div>',
         unsafe_allow_html=True,
+    )
+    _guide_box(
+        "Cómo usar el registro",
+        [
+            "Busca un código OC arriba para ver la ficha local (ítems, montos, partes).",
+            "«Ver en MP» abre la ficha oficial en Mercado Público (fuente primaria).",
+            "Descarga CSV si necesitas trabajar los datos en Excel u otra herramienta.",
+            "Los filtros del menú lateral también aplican a esta tabla.",
+        ],
     )
 
     # Sub-tabs para OC y Licitaciones
@@ -2150,11 +2257,18 @@ def _render_tab_ia(df_filtrado, prompt=None):
 
 
 def _render_tab_ia_impl(df_filtrado, prompt=None):
-    # Header simple sin HTML custom para evitar cualquier riesgo de divs sueltos
-    st.subheader("🤖 Cerebro Forense — Asistente de Investigación")
+    st.subheader("Cerebro Forense — Asistente de Investigación")
     st.caption(
-        "IA con acceso a 7 fuentes oficiales: Mercado Público, SERVEL, "
-        "InfoLobby, Contraloría, InfoProbidad, DIPRES y datos.gob."
+        "DeepSeek con acceso a Mercado Público, SERVEL, InfoLobby, "
+        "Contraloría, InfoProbidad, DIPRES y datos.gob."
+    )
+    _guide_box(
+        "Flujo recomendado",
+        [
+            "1) Pregunta concreta (RUT, empresa, municipio u OC).",
+            "2) Pide cruces (SERVEL, CGR, trato directo) y cifras exactas.",
+            "3) Genera el expediente PDF/Markdown y verifica en Mercado Público.",
+        ],
     )
 
     # Check de configuración VISIBLE — si no hay API key, el usuario ve un
@@ -2300,40 +2414,72 @@ def _render_tab_ia_impl(df_filtrado, prompt=None):
         unsafe_allow_html=True,
     )
 
-    # ── Generar Caso: dossier PDF de toda la conversación ──
-    # Solo aparece cuando ya hay al menos una pregunta+respuesta del usuario
+    # ── Generar Caso: dossier PDF/MD de toda la conversación ──
     _has_user_msgs = any(m.get("role") == "user" for m in st.session_state.ia_messages)
     if _has_user_msgs:
+        st.markdown("---")
+        _guide_box(
+            "Exportar expediente del caso",
+            [
+                "Investiga en el chat (proveedor, organismo, OC) y luego genera el expediente.",
+                "El PDF resume hallazgos, cifras y fuentes; el Markdown sirve para editarlo.",
+                "Verifica siempre códigos OC y montos en Mercado Público antes de publicar.",
+            ],
+        )
         col_caso, col_clear = st.columns([3, 1])
         with col_caso:
-            if st.button("📄 Generar Caso (PDF)", key="_btn_generar_caso",
-                          type="primary", use_container_width=True,
-                          help="La IA resume toda la conversación y arma un expediente formal en PDF para compartir o imprimir"):
+            if st.button(
+                "Generar expediente del caso",
+                key="_btn_generar_caso",
+                type="primary",
+                use_container_width=True,
+                help="Resume la conversación en un expediente formal (PDF + Markdown)",
+            ):
                 with st.spinner("Compilando expediente forense... (15-30s)"):
                     summary_md = generate_case_summary(st.session_state.ia_messages)
-                    pdf_bytes = _generate_case_pdf(summary_md)
-                    st.session_state["_caso_pdf_bytes"] = pdf_bytes
-                    st.session_state["_caso_pdf_name"] = f"expediente_ojo_pueblo_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf"
+                    stamp = datetime.now().strftime('%Y%m%d_%H%M')
                     st.session_state["_caso_summary_md"] = summary_md
-                st.success("Expediente listo. Descárgalo abajo o revisa el resumen.")
+                    st.session_state["_caso_pdf_bytes"] = _generate_case_pdf(summary_md)
+                    st.session_state["_caso_pdf_name"] = f"expediente_ojo_pueblo_{stamp}.pdf"
+                    st.session_state["_caso_md_name"] = f"expediente_ojo_pueblo_{stamp}.md"
+                st.success("Expediente listo. Descarga PDF o Markdown abajo.")
         with col_clear:
-            if st.button("🗑 Limpiar chat", key="_btn_clear_chat", use_container_width=True):
+            if st.button("Limpiar chat", key="_btn_clear_chat", use_container_width=True):
                 st.session_state.ia_messages = [st.session_state.ia_messages[0]]
                 st.session_state.ia_tools_used = {}
-                st.session_state.pop("_caso_pdf_bytes", None)
-                st.session_state.pop("_caso_summary_md", None)
+                for k in ("_caso_pdf_bytes", "_caso_summary_md", "_caso_pdf_name", "_caso_md_name"):
+                    st.session_state.pop(k, None)
                 st.rerun()
 
-        if st.session_state.get("_caso_pdf_bytes"):
-            st.download_button(
-                label="⬇ Descargar expediente PDF",
-                data=st.session_state["_caso_pdf_bytes"],
-                file_name=st.session_state["_caso_pdf_name"],
-                mime="application/pdf",
-                use_container_width=True,
-            )
-            with st.expander("Vista previa del expediente (markdown)", expanded=False):
-                st.markdown(st.session_state.get("_caso_summary_md", ""))
+        if st.session_state.get("_caso_summary_md"):
+            d1, d2 = st.columns(2)
+            with d1:
+                if st.session_state.get("_caso_pdf_bytes"):
+                    st.download_button(
+                        label="Descargar PDF",
+                        data=st.session_state["_caso_pdf_bytes"],
+                        file_name=st.session_state.get(
+                            "_caso_pdf_name",
+                            "expediente_ojo_pueblo.pdf",
+                        ),
+                        mime="application/pdf",
+                        use_container_width=True,
+                        key="_dl_caso_pdf",
+                    )
+            with d2:
+                st.download_button(
+                    label="Descargar Markdown",
+                    data=st.session_state["_caso_summary_md"].encode("utf-8"),
+                    file_name=st.session_state.get(
+                        "_caso_md_name",
+                        "expediente_ojo_pueblo.md",
+                    ),
+                    mime="text/markdown",
+                    use_container_width=True,
+                    key="_dl_caso_md",
+                )
+            with st.expander("Vista previa del expediente", expanded=True):
+                st.markdown(st.session_state["_caso_summary_md"])
 
     st.caption(f"Consultas restantes hoy: **{remaining}**/{daily_limit}")
 

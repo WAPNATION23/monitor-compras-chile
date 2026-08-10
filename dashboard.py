@@ -143,25 +143,52 @@ _bootstrap_secrets_to_env()
 
 _CUSTOM_CSS: str = """
 <style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;500;600;700;800&family=Source+Serif+4:opsz,wght@8..60,600;8..60,700&display=swap');
     .stApp {
-        background-color: #0B1120;
+        background:
+            radial-gradient(1100px 480px at 8% -12%, rgba(37, 99, 235, 0.13), transparent 55%),
+            radial-gradient(800px 360px at 92% 0%, rgba(15, 118, 110, 0.07), transparent 50%),
+            #0B1120;
         color: #CBD5E1;
-        font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+        font-family: 'Source Sans 3', 'Segoe UI', sans-serif;
+    }
+    .block-container {
+        padding-top: 1.35rem !important;
+        padding-bottom: 2.4rem !important;
+        max-width: 1400px;
     }
     div[data-testid="stSidebar"] {
         background: linear-gradient(180deg, #0F172A 0%, #0B1120 100%) !important;
         border-right: 1px solid rgba(51, 65, 85, 0.5);
     }
-    h1, h2, h3, h4 {
+    h1, h2 {
         color: #F1F5F9 !important;
-        font-family: 'Inter', sans-serif;
+        font-family: 'Source Serif 4', Georgia, serif;
         font-weight: 700;
-        letter-spacing: -0.025em;
+        letter-spacing: -0.02em;
     }
-    h1 { font-size: 2rem; border-bottom: none; padding-bottom: 0; margin-bottom: 4px; }
-    h3 { font-size: 1.15rem; margin-bottom: 4px; }
+    h3, h4 {
+        color: #F1F5F9 !important;
+        font-family: 'Source Sans 3', sans-serif;
+        font-weight: 700;
+        letter-spacing: -0.01em;
+    }
+    h1 { font-size: 2.05rem; border-bottom: none; padding-bottom: 0; margin-bottom: 2px; }
+    h3 { font-size: 1.12rem; margin-bottom: 4px; }
     h4 { font-size: 0.95rem; font-weight: 600; color: #94A3B8 !important; }
+    .brand-kicker {
+        font-size: 0.72rem; letter-spacing: 0.12em; text-transform: uppercase;
+        color: #60A5FA; font-weight: 600; margin: 0 0 4px 0;
+    }
+    .brand-sub { color: #94A3B8; font-size: 0.9rem; margin: 0; }
+    .stButton > button[kind="primary"] {
+        background: linear-gradient(135deg, #2563EB, #1D4ED8) !important;
+        border: 1px solid rgba(96, 165, 250, 0.35) !important;
+        color: #F8FAFC !important;
+        font-weight: 600 !important;
+        border-radius: 10px !important;
+        box-shadow: 0 6px 18px rgba(37, 99, 235, 0.2);
+    }
     [data-testid="stMetricValue"] {
         font-size: 1.45rem; font-weight: 800;
         color: #F8FAFC !important;
@@ -2139,12 +2166,11 @@ def _process_ia_query(effective_prompt: str, *, is_from_button: bool = False, st
     if "ia_messages" not in st.session_state:
         st.session_state.ia_messages = [
             {"role": "assistant", "content":
-             "**Cerebro Forense activado.**\n\n"
-             "Tengo acceso directo a la base de datos de órdenes de compra, "
-             "aportes SERVEL, registros de lobby, declaraciones de probidad, "
-             "fiscalizaciones de la Contraloría y fuentes web.\n\n"
-             "Puedo investigar **personas**, **empresas**, **organismos** o "
-             "ejecutar **análisis de anomalías** completos. ¿Qué necesitas?"}
+             "**Listo para investigar.**\n\n"
+             "Puedo cruzar órdenes de compra, aportes SERVEL, lobby, probidad y "
+             "fiscalizaciones CGR.\n\n"
+             "Indica un **RUT**, **empresa**, **organismo** o **código OC**. "
+             "Al terminar, genera el expediente PDF/Markdown."}
         ]
     if "ia_tools_used" not in st.session_state:
         st.session_state.ia_tools_used = {}
@@ -2297,12 +2323,11 @@ def _render_tab_ia_impl(df_filtrado, prompt=None):
     if "ia_messages" not in st.session_state:
         st.session_state.ia_messages = [
             {"role": "assistant", "content":
-             "**Cerebro Forense activado.**\n\n"
-             "Tengo acceso directo a la base de datos de órdenes de compra, "
-             "aportes SERVEL, registros de lobby, declaraciones de probidad, "
-             "fiscalizaciones de la Contraloría y fuentes web.\n\n"
-             "Puedo investigar **personas**, **empresas**, **organismos** o "
-             "ejecutar **análisis de anomalías** completos. ¿Qué necesitas?"}
+             "**Listo para investigar.**\n\n"
+             "Puedo cruzar órdenes de compra, aportes SERVEL, lobby, probidad y "
+             "fiscalizaciones CGR.\n\n"
+             "Indica un **RUT**, **empresa**, **organismo** o **código OC**. "
+             "Al terminar, genera el expediente PDF/Markdown."}
         ]
     if "ia_tools_used" not in st.session_state:
         st.session_state.ia_tools_used = {}
@@ -2478,109 +2503,161 @@ def _render_tab_ia_impl(df_filtrado, prompt=None):
                     use_container_width=True,
                     key="_dl_caso_md",
                 )
-            with st.expander("Vista previa del expediente", expanded=True):
+            with st.expander("Vista previa del expediente", expanded=False):
                 st.markdown(st.session_state["_caso_summary_md"])
+            st.caption(
+                "El PDF incluye portada, numeración y aviso legal. "
+                "Verifica siempre OC y montos en Mercado Público antes de publicar."
+            )
 
     st.caption(f"Consultas restantes hoy: **{remaining}**/{daily_limit}")
 
 
 def _generate_case_pdf(summary_md: str) -> bytes:
-    """Convierte el markdown del expediente a PDF (reportlab).
-
-    No interpreta markdown completo: detecta headers (#, ##, ###) y los renderiza
-    como títulos. El resto va como párrafos normales. Listas con '- ' se renderizan
-    como bullets.
-    """
+    """Convierte el markdown del expediente a PDF editorial (reportlab)."""
     from io import BytesIO
     from reportlab.lib.pagesizes import A4
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
     from reportlab.lib.units import cm
     from reportlab.lib.colors import HexColor
     from reportlab.platypus import (
-        SimpleDocTemplate, Paragraph, Spacer, PageBreak,
+        SimpleDocTemplate, Paragraph, Spacer, HRFlowable, KeepTogether,
     )
 
     buf = BytesIO()
+    ink = HexColor("#0F172A")
+    muted = HexColor("#475569")
+    accent = HexColor("#1D4ED8")
+    rule = HexColor("#CBD5E1")
+
+    def _footer(canvas, doc_):
+        canvas.saveState()
+        canvas.setStrokeColor(rule)
+        canvas.setLineWidth(0.4)
+        canvas.line(2 * cm, 1.5 * cm, A4[0] - 2 * cm, 1.5 * cm)
+        canvas.setFont("Helvetica", 8)
+        canvas.setFillColor(muted)
+        canvas.drawString(2 * cm, 1.1 * cm, "Ojo del Pueblo · monitor.wapnation.cl")
+        canvas.drawRightString(A4[0] - 2 * cm, 1.1 * cm, f"Página {doc_.page}")
+        canvas.restoreState()
+
     doc = SimpleDocTemplate(
         buf, pagesize=A4,
-        leftMargin=2*cm, rightMargin=2*cm,
-        topMargin=2*cm, bottomMargin=2*cm,
+        leftMargin=2 * cm, rightMargin=2 * cm,
+        topMargin=2.2 * cm, bottomMargin=2.2 * cm,
         title="Expediente Forense - Ojo del Pueblo",
         author="Ojo del Pueblo",
+        subject="Expediente generado desde datos públicos de compras del Estado",
     )
 
     styles = getSampleStyleSheet()
+    style_cover = ParagraphStyle(
+        "Cover", parent=styles["Heading1"],
+        fontName="Helvetica-Bold", fontSize=20, leading=24,
+        textColor=ink, spaceAfter=6, spaceBefore=0,
+    )
+    style_kicker = ParagraphStyle(
+        "Kicker", parent=styles["Normal"],
+        fontName="Helvetica", fontSize=9, textColor=accent,
+        spaceAfter=10, spaceBefore=0,
+    )
     style_h1 = ParagraphStyle(
         "H1", parent=styles["Heading1"],
-        fontSize=18, textColor=HexColor("#0b1e3f"),
-        spaceAfter=12, spaceBefore=6,
+        fontName="Helvetica-Bold", fontSize=16, textColor=ink,
+        spaceAfter=10, spaceBefore=4,
     )
     style_h2 = ParagraphStyle(
         "H2", parent=styles["Heading2"],
-        fontSize=14, textColor=HexColor("#1e3a8a"),
-        spaceAfter=8, spaceBefore=12,
+        fontName="Helvetica-Bold", fontSize=12, textColor=accent,
+        spaceAfter=6, spaceBefore=14,
+        borderPadding=2,
     )
     style_h3 = ParagraphStyle(
         "H3", parent=styles["Heading3"],
-        fontSize=11, textColor=HexColor("#2563eb"),
-        spaceAfter=6, spaceBefore=8,
+        fontName="Helvetica-Bold", fontSize=10.5, textColor=ink,
+        spaceAfter=4, spaceBefore=8,
     )
     style_body = ParagraphStyle(
         "Body", parent=styles["BodyText"],
-        fontSize=10, leading=14,
-        textColor=HexColor("#1f2937"),
-        spaceAfter=4,
+        fontName="Helvetica", fontSize=10, leading=14,
+        textColor=ink, spaceAfter=5,
     )
     style_bullet = ParagraphStyle(
         "Bullet", parent=style_body,
-        leftIndent=14, bulletIndent=4,
+        leftIndent=12, bulletIndent=0, spaceAfter=3,
     )
     style_meta = ParagraphStyle(
         "Meta", parent=style_body,
-        fontSize=9, textColor=HexColor("#64748b"),
-        italic=True, spaceAfter=12,
+        fontSize=9, textColor=muted, spaceAfter=10,
+    )
+    style_legal = ParagraphStyle(
+        "Legal", parent=style_meta,
+        fontSize=8, leading=11, spaceBefore=8,
     )
 
     def _md_inline(text: str) -> str:
-        # **bold** -> <b>...</b>, _italic_ -> <i>...</i>
+        text = html_mod.escape(text)
         text = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", text)
         text = re.sub(r"(?<!\w)_(.+?)_(?!\w)", r"<i>\1</i>", text)
-        # Escapar < y > que no sean tags conocidos (b/i/br)
-        text = re.sub(r"<(?!/?(?:b|i|br)\b)", "&lt;", text)
+        text = re.sub(r"`([^`]+)`", r"<font face='Courier' size='9'>\1</font>", text)
         return text
 
-    story = []
+    story = [
+        Paragraph("OJO DEL PUEBLO · FISCALIZACIÓN CIUDADANA", style_kicker),
+        Paragraph("Expediente forense de compras públicas", style_cover),
+        Paragraph(
+            f"Generado el {datetime.now().strftime('%d/%m/%Y %H:%M')} · "
+            "Fuente primaria: Mercado Público (ChileCompra)",
+            style_meta,
+        ),
+        HRFlowable(width="100%", thickness=1, color=accent, spaceAfter=14, spaceBefore=2),
+    ]
+
     for raw_line in summary_md.splitlines():
         line = raw_line.rstrip()
         if not line.strip():
-            story.append(Spacer(1, 4))
+            story.append(Spacer(1, 3))
+            continue
+        if line.strip() in ("---", "***", "___"):
+            story.append(HRFlowable(width="100%", thickness=0.5, color=rule, spaceBefore=6, spaceAfter=8))
             continue
         if line.startswith("# "):
-            story.append(Paragraph(_md_inline(line[2:].strip()), style_h1))
+            # Evitar duplicar portada si el modelo repite el H1
+            title = line[2:].strip()
+            if "EXPEDIENTE" in title.upper() and len(story) < 8:
+                continue
+            story.append(Paragraph(_md_inline(title), style_h1))
         elif line.startswith("## "):
-            story.append(Paragraph(_md_inline(line[3:].strip()), style_h2))
+            story.append(KeepTogether([
+                Spacer(1, 4),
+                Paragraph(_md_inline(line[3:].strip()), style_h2),
+                HRFlowable(width="100%", thickness=0.4, color=rule, spaceAfter=6),
+            ]))
         elif line.startswith("### "):
             story.append(Paragraph(_md_inline(line[4:].strip()), style_h3))
+        elif re.match(r"^\d+\.\s+", line.lstrip()):
+            story.append(Paragraph(_md_inline(line.lstrip()), style_bullet))
         elif line.lstrip().startswith(("- ", "* ")):
             bullet_text = line.lstrip()[2:].strip()
             story.append(Paragraph(f"• {_md_inline(bullet_text)}", style_bullet))
         elif line.startswith("_") and line.endswith("_") and len(line) > 2:
-            story.append(Paragraph(_md_inline(line), style_meta))
+            story.append(Paragraph(_md_inline(line.strip("_")), style_meta))
         else:
             story.append(Paragraph(_md_inline(line), style_body))
 
-    # Footer legal
-    story.append(Spacer(1, 16))
-    story.append(Paragraph(
-        "<i>Este expediente fue generado automáticamente por la plataforma "
-        "<b>Ojo del Pueblo</b> (monitor.wapnation.cl) a partir de datos públicos "
-        "de Mercado Público, SERVEL y otras fuentes oficiales del Estado de Chile. "
-        "No constituye prueba judicial. Verifica los datos en sus fuentes originales "
-        "antes de citarlos públicamente.</i>",
-        style_meta,
-    ))
+    story.extend([
+        Spacer(1, 14),
+        HRFlowable(width="100%", thickness=0.6, color=rule, spaceAfter=8),
+        Paragraph(
+            "Aviso: este expediente fue generado automáticamente por Ojo del Pueblo "
+            "(monitor.wapnation.cl) a partir de datos públicos (Mercado Público, SERVEL y otras "
+            "fuentes oficiales). No constituye prueba judicial. Verifica códigos OC, RUTs y montos "
+            "en sus fuentes originales antes de citarlos públicamente.",
+            style_legal,
+        ),
+    ])
 
-    doc.build(story)
+    doc.build(story, onFirstPage=_footer, onLaterPages=_footer)
     return buf.getvalue()
 
 
@@ -2946,13 +3023,17 @@ def main():
     )
 
     # ENCABEZADO PRINCIPAL
-    col_t1, col_t2, col_t3 = st.columns([0.06, 0.64, 0.3])
+    col_t1, col_t2, col_t3 = st.columns([0.07, 0.63, 0.3])
     with col_t1:
         if os.path.exists(_LOGO_PATH):
             st.image(_LOGO_PATH, use_container_width=True)
     with col_t2:
+        st.markdown('<p class="brand-kicker">Monitor ciudadano</p>', unsafe_allow_html=True)
         st.title("Ojo del Pueblo")
-        st.caption("Plataforma de fiscalización ciudadana — Compras públicas del Estado de Chile")
+        st.markdown(
+            '<p class="brand-sub">Fiscalización de compras públicas · datos oficiales de ChileCompra</p>',
+            unsafe_allow_html=True,
+        )
     with col_t3:
         # ── Indicador de frescura de datos (lee el marker de daily_update) ──
         try:

@@ -966,6 +966,10 @@ def build_system_prompt(web_context: str, db_context: str,
         f"{web_context}\n"
         "\n##############################################################\n"
         "DIRECTRICES (OBLIGATORIO):\n"
+        "0. CALIDAD DE RESPUESTA: abre con 1-2 lineas de hallazgo clave (sin 'Claro,', "
+        "'Por supuesto,' ni relleno). Usa bullets densos. Si la pregunta es simple, "
+        "responde en menos de 250 palabras. Si es investigacion, usa la estructura "
+        "completa. Cierra con nivel de confianza: ALTA / MEDIA / BAJA y por que.\n"
         "1. Habla como un analista entregando un expediente clasificado. Cero frases genericas.\n"
         "2. FUENTE PRIMARIA = MERCADO PUBLICO + BD LOCAL. Empieza SIEMPRE el expediente "
         "citando datos exactos de Mercado Publico (codigos OC, RUTs, montos en CLP, "
@@ -1090,8 +1094,9 @@ def call_deepseek(messages: list[dict], web_context: str, db_context: str,
     payload = {
         "model": "deepseek-v4-pro",
         "messages": [{"role": "system", "content": system_prompt}]
-        + [{"role": m["role"], "content": m["content"]} for m in messages[-8:]],
-        "temperature": 0.4,
+        + [{"role": m["role"], "content": m["content"]} for m in messages[-10:]],
+        "temperature": 0.25,
+        "max_tokens": 3500,
     }
 
     import time as _time
@@ -1157,38 +1162,39 @@ def generate_case_summary(messages: list[dict]) -> str:
             out.append("")
         return "\n".join(out)
 
-    fecha = datetime.now().strftime("%d de %B de %Y, %H:%M")
+    fecha = datetime.now().strftime("%d/%m/%Y %H:%M")
     system = (
         "Eres el redactor jefe del Cerebro Forense de 'Ojo del Pueblo'. "
-        "Recibiras una conversacion completa entre un investigador y la IA forense. "
-        "Tu tarea: producir un EXPEDIENTE FORENSE FORMAL en markdown listo para imprimir como PDF "
-        "de prueba periodistica. Audiencia: periodistas, fiscales, ciudadanos.\n\n"
-        "ESTRUCTURA OBLIGATORIA (usar exactamente estos headers):\n"
-        "# EXPEDIENTE FORENSE - OJO DEL PUEBLO\n"
-        f"_Generado el {fecha}_\n\n"
+        "Recibiras una conversacion entre un investigador y la IA forense. "
+        "Produce un EXPEDIENTE FORENSE FORMAL en markdown, listo para PDF periodistico. "
+        "Audiencia: periodistas, fiscales, ciudadanos.\n\n"
+        "ESTRUCTURA OBLIGATORIA (headers exactos):\n"
+        "# EXPEDIENTE FORENSE — OJO DEL PUEBLO\n"
+        f"_Generado el {fecha} · monitor.wapnation.cl_\n\n"
         "## 1. RESUMEN EJECUTIVO\n"
-        "(3-5 lineas: que se investigo, que se encontro, nivel de gravedad)\n\n"
+        "(3-5 lineas: objeto, hallazgo principal, gravedad ALTA/MEDIA/BAJA)\n\n"
         "## 2. OBJETIVO DE LA INVESTIGACION\n"
-        "(que pregunta inicial planteo el investigador)\n\n"
+        "(pregunta inicial del investigador)\n\n"
         "## 3. HALLAZGOS CLAVE\n"
-        "(bullets con cifras exactas: RUTs, codigos OC, montos en CLP, fechas. "
-        "Cada bullet termina con la fuente citada)\n\n"
-        "## 4. CRUCES Y ANOMALIAS DETECTADAS\n"
-        "(patrones sospechosos, aportes SERVEL, conflictos de interes, abuso TD)\n\n"
-        "## 5. EVIDENCIA DE MERCADO PUBLICO\n"
-        "(datos exactos de la API oficial: codigos OC, organismos, fechas, montos)\n\n"
+        "(bullets con RUT, codigo OC, monto CLP, fecha; cada bullet termina con fuente)\n\n"
+        "## 4. CRUCES Y ANOMALIAS\n"
+        "(SERVEL, CGR, lobby, concentracion, abuso TD; solo si hay evidencia)\n\n"
+        "## 5. EVIDENCIA MERCADO PUBLICO\n"
+        "(tabla mental en bullets: codigo OC | organismo | proveedor | monto | tipo)\n\n"
         "## 6. FUENTES COMPLEMENTARIAS\n"
-        "(URLs concretas de Dateas, Cooperativa, TodoLicitaciones u otros)\n\n"
-        "## 7. RECOMENDACION DE PROFUNDIZACION\n"
-        "(que linea seguir investigando, que documentos pedir por Transparencia)\n\n"
-        "## 8. APENDICE - TRANSCRIPCION RESUMIDA\n"
-        "(resume cada turno del chat en 2-3 lineas, no transcribas literal)\n\n"
+        "(URLs concretas; si no hay: '(no disponible en la consulta actual)')\n\n"
+        "## 7. NIVEL DE CONFIANZA\n"
+        "(ALTA/MEDIA/BAJA + 2 razones; que falta verificar)\n\n"
+        "## 8. PROXIMOS PASOS\n"
+        "(Transparencia, MP, CGR; acciones concretas)\n\n"
+        "## 9. APENDICE — TRANSCRIPCION RESUMIDA\n"
+        "(2-3 lineas por turno; no copies literal)\n\n"
         "REGLAS:\n"
-        "- Cita SIEMPRE cifras exactas tal como aparecieron en la conversacion. NO inventes datos.\n"
-        "- Si un dato no esta en la conversacion, escribe '(no disponible en la consulta actual)'.\n"
-        "- Tono: profesional, sobrio, basado en evidencia. Sin opinionologia.\n"
-        "- NO uses emojis. NO uses cajas unicode. Markdown plano.\n"
-        "- Largo objetivo: 600-1200 palabras.\n"
+        "- Cifras exactas de la conversacion. NUNCA inventes OC, RUT ni montos.\n"
+        "- Dato ausente = '(no disponible en la consulta actual)'.\n"
+        "- Tono sobrio, sin emojis, sin adjetivos sensacionalistas.\n"
+        "- Markdown plano. 700-1100 palabras.\n"
+        "- Prioriza evidencia primaria (Mercado Publico) sobre prensa.\n"
     )
 
     user_payload = "CONVERSACION A RESUMIR:\n\n"
@@ -1203,7 +1209,8 @@ def generate_case_summary(messages: list[dict]) -> str:
             {"role": "system", "content": system},
             {"role": "user", "content": user_payload},
         ],
-        "temperature": 0.2,
+        "temperature": 0.15,
+        "max_tokens": 4000,
     }
 
     try:

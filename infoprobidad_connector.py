@@ -35,6 +35,7 @@ from __future__ import annotations
 import logging
 import re
 import sqlite3
+import time
 from typing import Any
 
 import pandas as pd
@@ -91,6 +92,41 @@ CREATE TABLE IF NOT EXISTS actividades_probidad (
 )
 """
 
+CREATE_CRUCES_SQL: str = """
+CREATE TABLE IF NOT EXISTS cruces_probidad (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    proveedor_query TEXT NOT NULL,
+    funcionario TEXT,
+    cargo TEXT,
+    institucion TEXT,
+    vinculo_declarado TEXT,
+    tipo_vinculo TEXT,
+    fecha_ingreso TEXT DEFAULT (datetime('now')),
+    UNIQUE(proveedor_query, funcionario, vinculo_declarado, tipo_vinculo)
+)
+"""
+
+# Tokens corporativos poco útiles para match SPARQL
+_EMPRESA_NOISE = re.compile(
+    r"\b(SPA|S\.?P\.?A\.?|LTDA\.?|LIMITADA|S\.?A\.?|E\.?I\.?R\.?L\.?|"
+    r"SOCIEDAD|COMERCIAL|IMPORTADORA|EXPORTADORA|DISTRIBUIDORA|"
+    r"CONSTRUCTORA|CONSULTORA|SERVICIOS|EMPRESA)\b",
+    re.IGNORECASE,
+)
+
+
+def _empresa_query(nombre: str) -> str:
+    """Normaliza nombre de empresa a un token searchable en SPARQL."""
+    raw = (nombre or "").strip()
+    if not raw:
+        return ""
+    cleaned = _EMPRESA_NOISE.sub(" ", raw)
+    cleaned = re.sub(r"[^\w\sáéíóúñüÁÉÍÓÚÑÜ]", " ", cleaned, flags=re.UNICODE)
+    parts = [p for p in cleaned.split() if len(p) >= 3][:4]
+    if parts:
+        return " ".join(parts)
+    return re.sub(r"\s+", " ", raw)[:40].strip()
+
 
 class InfoProbidadConnector:
     """Conector para datos de InfoProbidad (declaraciones de probidad)."""
@@ -110,6 +146,7 @@ class InfoProbidadConnector:
             with sqlite3.connect(self.db_path) as conn:
                 conn.execute(CREATE_DECLARANTES_SQL)
                 conn.execute(CREATE_ACTIVIDADES_SQL)
+                conn.execute(CREATE_CRUCES_SQL)
         except sqlite3.Error as exc:
             logger.error("Error inicializando tablas InfoProbidad: %s", exc)
 
@@ -420,6 +457,167 @@ class InfoProbidadConnector:
         except (sqlite3.Error, Exception) as exc:
             logger.error("Error guardando actividades en DB: %s", exc)
             return 0
+
+    def guardar_cruces(
+        self,
+        cruces: list[dict[str, str]],
+        proveedor_query: str,
+    ) -> int:
+        """Persiste cruces funcionario↔proveedor (dedupe por UNIQUE)."""
+        if not cruces or not proveedor_query:
+            return 0
+        inserted = 0
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                conn.execute(CREATE_CRUCES_SQL)
+                for c in cruces:
+                    cur = conn.execute(
+                        """
+                        INSERT OR IGNORE INTO cruces_probidad
+                        (proveedor_query, funcionario, cargo, institucion,
+                         vinculo_declarado, tipo_vinculo)
+                        VALUES (?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            proveedor_query,
+                            c.get("funcionario", ""),
+                            c.get("cargo", "N/D"),
+                            c.get("institucion", "N/D"),
+                            c.get("vinculo_declarado", "N/D"),
+                            c.get("tipo_vinculo", "N/D"),
+                        ),
+                    )
+                    inserted += cur.rowcount
+                conn.commit()
+        except sqlite3.Error as exc:
+            logger.error("Error guardando cruces InfoProbidad: %s", exc)
+            return 0
+        return inserted
+
+    # ═══════════════════════════════════════════════════════════
+    # Sync masivo desde OC locales (semanal)
+    # ═══════════════════════════════════════════════════════════
+
+    def _top_proveedores(self, limit: int) -> list[str]:
+        """Top proveedores por monto CLP (fallback monto_total_item)."""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                rows = conn.execute(
+                    """
+                    SELECT nombre_proveedor,
+                           COALESCE(SUM(monto_total_item_clp), SUM(monto_total_item), 0) AS total
+                    FROM ordenes_items
+                    WHERE nombre_proveedor IS NOT NULL
+                      AND TRIM(nombre_proveedor) != ''
+                      AND LENGTH(TRIM(nombre_proveedor)) >= 5
+                    GROUP BY LOWER(TRIM(nombre_proveedor))
+                    ORDER BY total DESC
+                    LIMIT ?
+                    """,
+                    (limit,),
+                ).fetchall()
+            return [str(r[0]).strip() for r in rows if r[0]]
+        except sqlite3.Error as exc:
+            logger.warning("No se pudieron leer proveedores para InfoProbidad: %s", exc)
+            return []
+
+    def _top_organismos(self, limit: int) -> list[str]:
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                rows = conn.execute(
+                    """
+                    SELECT nombre_comprador, COUNT(DISTINCT codigo_oc) AS n
+                    FROM ordenes_items
+                    WHERE nombre_comprador IS NOT NULL AND TRIM(nombre_comprador) != ''
+                    GROUP BY LOWER(TRIM(nombre_comprador))
+                    ORDER BY n DESC
+                    LIMIT ?
+                    """,
+                    (limit,),
+                ).fetchall()
+            return [str(r[0]).strip() for r in rows if r[0]]
+        except sqlite3.Error as exc:
+            logger.warning("No se pudieron leer organismos para InfoProbidad: %s", exc)
+            return []
+
+    def sync_desde_ordenes(
+        self,
+        top_proveedores: int = 40,
+        top_organismos: int = 12,
+        delay_s: float = 1.2,
+    ) -> dict[str, Any]:
+        """
+        Carga local semanal: cruza top proveedores OC vs declaraciones SPARQL
+        y guarda declarantes de organismos frecuentes.
+        """
+        t0 = time.perf_counter()
+        proveedores = self._top_proveedores(top_proveedores)
+        organismos = self._top_organismos(top_organismos)
+
+        n_cruces = 0
+        n_hits = 0
+        n_declarantes = 0
+        n_actividades = 0
+        queries_ok = 0
+        seen_queries: set[str] = set()
+
+        for nombre in proveedores:
+            q = _empresa_query(nombre)
+            if not q or len(q) < 3 or q.lower() in seen_queries:
+                continue
+            seen_queries.add(q.lower())
+            try:
+                cruces = self.cruzar_con_proveedor(q)
+                queries_ok += 1
+                if cruces:
+                    n_hits += 1
+                    n_cruces += self.guardar_cruces(cruces, q)
+                    # También guardar como actividades para consultas locales
+                    acts = [
+                        {
+                            "nombre": c.get("funcionario", ""),
+                            "cargo": c.get("cargo", "N/D"),
+                            "institucion": c.get("institucion", "N/D"),
+                            "actividad": c.get("vinculo_declarado", "N/D"),
+                            "tipo_actividad": c.get("tipo_vinculo", "N/D"),
+                        }
+                        for c in cruces
+                    ]
+                    n_actividades += self.guardar_actividades(acts)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("InfoProbidad sync proveedor '%s': %s", q, exc)
+            time.sleep(max(0.0, delay_s))
+
+        for org in organismos:
+            # Palabra distintiva del organismo (evita "I. MUNICIPALIDAD DE X" completo)
+            tokens = [t for t in re.findall(r"[A-Za-zÁÉÍÓÚÑáéíóúñ]{4,}", org) if t.upper() not in {
+                "MUNICIPALIDAD", "MINISTERIO", "SERVICIO", "DIRECCION", "DIRECCIÓN",
+                "GOBIERNO", "REGIONAL", "PUBLICO", "PÚBLICO", "NACIONAL",
+            }]
+            q = tokens[0] if tokens else org[:30]
+            if len(q) < 4:
+                continue
+            try:
+                decls = self.buscar_declarante(q, limit=15)
+                queries_ok += 1
+                if decls:
+                    n_declarantes += self.guardar_declarantes(decls)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("InfoProbidad sync organismo '%s': %s", q, exc)
+            time.sleep(max(0.0, delay_s))
+
+        stats = {
+            "proveedores_consultados": len(seen_queries),
+            "organismos_consultados": len(organismos),
+            "queries_ok": queries_ok,
+            "proveedores_con_hit": n_hits,
+            "cruces_nuevos": n_cruces,
+            "declarantes_guardados": n_declarantes,
+            "actividades_guardadas": n_actividades,
+            "duration_s": round(time.perf_counter() - t0, 1),
+        }
+        logger.info("InfoProbidad sync_desde_ordenes: %s", stats)
+        return stats
 
     # ═══════════════════════════════════════════════════════════
     # Consultar datos locales

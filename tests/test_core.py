@@ -1235,6 +1235,25 @@ class TestInfoProbidadConnector:
         conn.close()
         assert "declarantes_probidad" in tables
         assert "actividades_probidad" in tables
+        assert "cruces_probidad" in tables
+
+    def test_empresa_query_strips_noise(self):
+        from infoprobidad_connector import _empresa_query
+        assert "ACME" in _empresa_query("ACME SPA Limitada").upper()
+        assert _empresa_query("") == ""
+
+    def test_guardar_cruces_dedupe(self, tmp_path):
+        from infoprobidad_connector import InfoProbidadConnector
+        ip = InfoProbidadConnector(db_path=str(tmp_path / "test_ip.db"))
+        cruces = [{
+            "funcionario": "Ana Pérez",
+            "cargo": "Directora",
+            "institucion": "MINSAL",
+            "vinculo_declarado": "Socio ACME",
+            "tipo_vinculo": "ACCION/DERECHO",
+        }]
+        assert ip.guardar_cruces(cruces, "ACME") == 1
+        assert ip.guardar_cruces(cruces, "ACME") == 0
 
     def test_buscar_declarante_empty_name(self, tmp_path):
         from infoprobidad_connector import InfoProbidadConnector
@@ -1516,32 +1535,6 @@ class TestContraloriaConnector:
         cgr = ContraloriaConnector(db_path=str(test_db))
         result = cgr.cruzar_compradores_fiscalizados()
         assert isinstance(result, pd.DataFrame)
-
-
-# ══════════════════════════════════════════════
-# Tests: InfoProbidadConnector
-# ══════════════════════════════════════════════
-
-class TestInfoProbidadConnector:
-    """Tests para el conector de InfoProbidad."""
-
-    def test_init_creates_table(self, tmp_path):
-        from infoprobidad_connector import InfoProbidadConnector
-        db_path = tmp_path / "test_ip.db"
-        ip = InfoProbidadConnector(db_path=str(db_path))
-        conn = sqlite3.connect(db_path)
-        tables = [r[0] for r in conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table'"
-        ).fetchall()]
-        conn.close()
-        assert "declarantes_probidad" in tables
-
-    def test_cruzar_con_proveedor_empty(self, tmp_path):
-        from infoprobidad_connector import InfoProbidadConnector
-        db_path = tmp_path / "test_ip.db"
-        ip = InfoProbidadConnector(db_path=str(db_path))
-        result = ip.cruzar_con_proveedor("12345678-9")
-        assert isinstance(result, (pd.DataFrame, list, dict, type(None)))
 
 
 # ══════════════════════════════════════════════

@@ -114,22 +114,50 @@ def tool_datos_gob_sanciones(prompt: str, stopwords: frozenset[str]) -> tuple[st
 
 
 def tool_infoprobidad_persona(prompt: str) -> tuple[str, str]:
-    """Busca declarante por nombre en InfoProbidad (SPARQL live)."""
+    """Busca en cache local (cruces/declarantes) y luego SPARQL live."""
     try:
         from infoprobidad_connector import InfoProbidadConnector
 
         ip = InfoProbidadConnector(DB_PATH)
-        # Extraer posible nombre propio (2+ palabras capitalizadas o todo el prompt acotado)
         nombre = prompt.strip()[:120]
+        lines: list[str] = []
+
+        # Cache local de cruces proveedor↔funcionario (sync semanal)
+        try:
+            with sqlite3.connect(DB_PATH) as conn:
+                rows = conn.execute(
+                    """
+                    SELECT proveedor_query, funcionario, cargo, institucion,
+                           vinculo_declarado, tipo_vinculo
+                    FROM cruces_probidad
+                    WHERE LOWER(proveedor_query) LIKE ?
+                       OR LOWER(funcionario) LIKE ?
+                       OR LOWER(vinculo_declarado) LIKE ?
+                    LIMIT 15
+                    """,
+                    (f"%{nombre.lower()}%", f"%{nombre.lower()}%", f"%{nombre.lower()}%"),
+                ).fetchall()
+            if rows:
+                lines.append(f"### INFOPROBIDAD LOCAL — {len(rows)} cruces ###")
+                for r in rows:
+                    lines.append(
+                        f"- Proveedor~{r[0]} | Funcionario: {r[1]} | "
+                        f"{r[2]} @ {r[3]} | {r[5]}: {r[4]} | Confianza: media (cache)"
+                    )
+        except sqlite3.Error:
+            pass
+
         decls = ip.buscar_declarante(nombre, limit=10)
-        if not decls:
-            return "InfoProbidad", f"Sin declarantes para '{nombre[:60]}'."
-        lines = [f"### INFOPROBIDAD — {len(decls)} declarantes ###"]
-        for d in decls[:10]:
-            lines.append(
-                f"- {d.get('nombre', '?')} | Cargo: {d.get('cargo', '?')} | "
-                f"Inst: {d.get('institucion', '?')} | Confianza: media (match por nombre)"
-            )
+        if decls:
+            lines.append(f"### INFOPROBIDAD LIVE — {len(decls)} declarantes ###")
+            for d in decls[:10]:
+                lines.append(
+                    f"- {d.get('nombre', '?')} | Cargo: {d.get('cargo', '?')} | "
+                    f"Inst: {d.get('institucion', '?')} | Confianza: media (match por nombre)"
+                )
+
+        if not lines:
+            return "InfoProbidad", f"Sin declarantes/cruces para '{nombre[:60]}'."
         return "InfoProbidad (persona)", "\n".join(lines)
     except Exception as exc:  # noqa: BLE001
         return "InfoProbidad", f"[Error: {exc}]"

@@ -52,6 +52,12 @@ CATCHUP_MAX_DAYS = int(os.getenv("CATCHUP_MAX_DAYS", "14"))
 RESYNC_RECENT_DAYS = int(os.getenv("RESYNC_RECENT_DAYS", "30"))
 RESYNC_MAX_OCS = int(os.getenv("RESYNC_MAX_OCS", "200"))
 SERVEL_REFRESH_DAYS = int(os.getenv("SERVEL_REFRESH_DAYS", "7"))
+INFOPROBIDAD_REFRESH_DAYS = int(os.getenv("INFOPROBIDAD_REFRESH_DAYS", "7"))
+INFOPROBIDAD_TOP_PROV = int(os.getenv("INFOPROBIDAD_TOP_PROV", "40"))
+INFOPROBIDAD_TOP_ORG = int(os.getenv("INFOPROBIDAD_TOP_ORG", "12"))
+ENRICH_RUT_MAX_OCS = int(os.getenv("ENRICH_RUT_MAX_OCS", "60"))
+ENRICH_PROVEEDOR_MAX = int(os.getenv("ENRICH_PROVEEDOR_MAX", "40"))
+LIC_DETALLE_MAX = int(os.getenv("LIC_DETALLE_MAX", "25"))
 # Relleno lento: evita 429 y construye BD grande a lo largo de semanas
 BACKFILL_ENABLED = os.getenv("BACKFILL_ENABLED", "1").strip().lower() in ("1", "true", "yes")
 BACKFILL_OC_BUDGET = int(os.getenv("BACKFILL_OC_BUDGET", "500"))
@@ -129,14 +135,35 @@ def _ensure_licitaciones_table(conn: sqlite3.Connection) -> None:
             tipo TEXT,
             monto_estimado REAL,
             raw_json TEXT,
+            tiene_detalle INTEGER DEFAULT 0,
+            n_adjudicados INTEGER DEFAULT 0,
             fecha_extraccion TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+    # Migración suave si la tabla ya existía sin columnas nuevas
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(licitaciones)").fetchall()}
+    if "tiene_detalle" not in cols:
+        conn.execute("ALTER TABLE licitaciones ADD COLUMN tiene_detalle INTEGER DEFAULT 0")
+    if "n_adjudicados" not in cols:
+        conn.execute("ALTER TABLE licitaciones ADD COLUMN n_adjudicados INTEGER DEFAULT 0")
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS licitaciones_adjudicados (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            codigo_externo TEXT NOT NULL,
+            rut_proveedor TEXT,
+            nombre_proveedor TEXT,
+            monto REAL,
+            item_nombre TEXT,
+            UNIQUE(codigo_externo, rut_proveedor, item_nombre)
         )
         """
     )
 
 
-def _store_licitaciones(licitaciones: list[dict[str, Any]]) -> int:
-    """Inserta licitaciones nuevas en SQLite. Retorna cantidad insertada."""
+def _store_licitaciones(licitaciones: list[dict[str, Any]], *, upsert: bool = False) -> int:
+    """Inserta licitaciones nuevas en SQLite. Retorna cantidad insertada/actualizada."""
     if not licitaciones:
         return 0
     inserted = 0
@@ -146,32 +173,160 @@ def _store_licitaciones(licitaciones: list[dict[str, Any]]) -> int:
             codigo = lic.get("CodigoExterno") or lic.get("codigo_externo") or ""
             if not codigo:
                 continue
+            raw = json.dumps(lic, ensure_ascii=False, default=str)[:12000]
+            vals = (
+                codigo,
+                str(lic.get("Nombre", ""))[:500],
+                str(lic.get("Estado", "")),
+                str(lic.get("FechaPublicacion", "")),
+                str(lic.get("FechaCierre", "")),
+                str(lic.get("NombreOrganismo", ""))[:300],
+                str(lic.get("Tipo", "")),
+                float(lic.get("MontoEstimado") or 0),
+                raw,
+            )
             try:
-                conn.execute(
-                    """
-                    INSERT OR IGNORE INTO licitaciones
-                    (codigo_externo, nombre, estado, fecha_publicacion,
-                     fecha_cierre, nombre_organismo, tipo, monto_estimado, raw_json)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        codigo,
-                        str(lic.get("Nombre", ""))[:500],
-                        str(lic.get("Estado", "")),
-                        str(lic.get("FechaPublicacion", "")),
-                        str(lic.get("FechaCierre", "")),
-                        str(lic.get("NombreOrganismo", ""))[:300],
-                        str(lic.get("Tipo", "")),
-                        float(lic.get("MontoEstimado") or 0),
-                        json.dumps(lic, ensure_ascii=False, default=str)[:5000],
-                    ),
-                )
-                if conn.total_changes:
+                if upsert:
+                    conn.execute(
+                        """
+                        INSERT INTO licitaciones
+                        (codigo_externo, nombre, estado, fecha_publicacion,
+                         fecha_cierre, nombre_organismo, tipo, monto_estimado, raw_json)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ON CONFLICT(codigo_externo) DO UPDATE SET
+                            nombre=excluded.nombre,
+                            estado=excluded.estado,
+                            fecha_publicacion=excluded.fecha_publicacion,
+                            fecha_cierre=excluded.fecha_cierre,
+                            nombre_organismo=excluded.nombre_organismo,
+                            tipo=excluded.tipo,
+                            monto_estimado=excluded.monto_estimado,
+                            raw_json=excluded.raw_json,
+                            fecha_extraccion=CURRENT_TIMESTAMP
+                        """,
+                        vals,
+                    )
                     inserted += 1
+                else:
+                    conn.execute(
+                        """
+                        INSERT OR IGNORE INTO licitaciones
+                        (codigo_externo, nombre, estado, fecha_publicacion,
+                         fecha_cierre, nombre_organismo, tipo, monto_estimado, raw_json)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        vals,
+                    )
+                    if conn.total_changes:
+                        inserted += 1
             except (sqlite3.Error, ValueError) as exc:
                 logger.warning("Error guardando licitación %s: %s", codigo, exc)
         conn.commit()
     return inserted
+
+
+def _parse_licitacion_adjudicados(detalle: dict[str, Any]) -> list[dict[str, Any]]:
+    """Extrae proveedores adjudicados del JSON de detalle MP."""
+    out: list[dict[str, Any]] = []
+    items = detalle.get("Items") or {}
+    listado = items.get("Listado") if isinstance(items, dict) else items
+    if not isinstance(listado, list):
+        listado = []
+
+    for item in listado:
+        if not isinstance(item, dict):
+            continue
+        adj = item.get("Adjudicacion") or {}
+        if not isinstance(adj, dict):
+            continue
+        rut = str(adj.get("RutProveedor") or adj.get("RutProveedorAdjudicado") or "").strip()
+        nombre = str(
+            adj.get("NombreProveedor")
+            or adj.get("NombreProveedorAdjudicado")
+            or ""
+        ).strip()
+        if not rut and not nombre:
+            continue
+        monto = adj.get("MontoUnitario") or adj.get("MontoLinea") or adj.get("Monto") or 0
+        try:
+            monto_f = float(monto or 0)
+        except (TypeError, ValueError):
+            monto_f = 0.0
+        out.append({
+            "rut_proveedor": rut,
+            "nombre_proveedor": nombre[:300],
+            "monto": monto_f,
+            "item_nombre": str(item.get("NombreProducto") or item.get("Descripcion") or "")[:300],
+        })
+
+    # Fallback: bloque Adjudicacion a nivel licitación
+    if not out:
+        top = detalle.get("Adjudicacion") or {}
+        if isinstance(top, dict):
+            for key in ("Proveedores", "Listado", "Adjudicados"):
+                blob = top.get(key)
+                if isinstance(blob, list):
+                    for p in blob:
+                        if not isinstance(p, dict):
+                            continue
+                        rut = str(p.get("RutProveedor") or p.get("Rut") or "").strip()
+                        nombre = str(p.get("NombreProveedor") or p.get("Nombre") or "").strip()
+                        if rut or nombre:
+                            out.append({
+                                "rut_proveedor": rut,
+                                "nombre_proveedor": nombre[:300],
+                                "monto": float(p.get("Monto") or 0),
+                                "item_nombre": "",
+                            })
+    return out
+
+
+def _store_licitacion_detalle(codigo: str, detalle: dict[str, Any]) -> int:
+    """Guarda detalle + adjudicados; retorna N adjudicados nuevos."""
+    if not detalle.get("CodigoExterno"):
+        detalle = {**detalle, "CodigoExterno": codigo}
+    ads = _parse_licitacion_adjudicados(detalle)
+    _store_licitaciones([detalle], upsert=True)
+    n = 0
+    with sqlite3.connect(DB_NAME) as conn:
+        _ensure_licitaciones_table(conn)
+        for a in ads:
+            cur = conn.execute(
+                """
+                INSERT OR IGNORE INTO licitaciones_adjudicados
+                (codigo_externo, rut_proveedor, nombre_proveedor, monto, item_nombre)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (
+                    codigo,
+                    a["rut_proveedor"],
+                    a["nombre_proveedor"],
+                    a["monto"],
+                    a["item_nombre"],
+                ),
+            )
+            n += cur.rowcount
+        conn.execute(
+            """
+            UPDATE licitaciones
+            SET tiene_detalle = 1,
+                n_adjudicados = (
+                    SELECT COUNT(*) FROM licitaciones_adjudicados
+                    WHERE codigo_externo = ?
+                ),
+                raw_json = ?,
+                estado = COALESCE(NULLIF(?, ''), estado)
+            WHERE codigo_externo = ?
+            """,
+            (
+                codigo,
+                json.dumps(detalle, ensure_ascii=False, default=str)[:12000],
+                str(detalle.get("Estado", "")),
+                codigo,
+            ),
+        )
+        conn.commit()
+    return n
 
 
 # ─────────────────────── Updaters por fuente ───────────────────────
@@ -263,21 +418,261 @@ def update_orders(fecha: date, max_oc: int | None = None) -> dict[str, Any]:
 
 
 def update_licitaciones(fecha: date) -> dict[str, Any]:
-    """Extrae + guarda licitaciones de la fecha indicada."""
+    """Extrae + guarda licitaciones del día (todas + adjudicadas) y enriquece detalle."""
     from licitaciones_extractor import LicitacionesExtractor
 
     t0 = _time.perf_counter()
     try:
         extractor = LicitacionesExtractor()
         listado = extractor.extract_by_date(fecha)
+        try:
+            adjudicadas = extractor.extract_by_date(fecha, estado="adjudicada")
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Error listando adjudicadas: %s", exc)
+            adjudicadas = []
     except Exception as exc:  # noqa: BLE001
         logger.warning("Error extrayendo licitaciones: %s", exc)
         return {"error": str(exc), "duration_s": 0.0}
-    inserted = _store_licitaciones(listado[:EXTRACT_LIC_LIMIT])
+
+    # Merge por código (adjudicadas pisan estado si vienen en ambos)
+    by_code: dict[str, dict[str, Any]] = {}
+    for lic in listado + adjudicadas:
+        codigo = lic.get("CodigoExterno") or ""
+        if codigo:
+            by_code[codigo] = lic
+    merged = list(by_code.values())[:EXTRACT_LIC_LIMIT]
+    inserted = _store_licitaciones(merged)
+
+    # Priorizar detalle de adjudicadas de la fecha
+    adj_codes = [
+        (lic.get("CodigoExterno") or "")
+        for lic in adjudicadas
+        if lic.get("CodigoExterno")
+    ][:LIC_DETALLE_MAX]
+    detalle_stats = enrich_licitaciones_detalle(
+        max_detalle=LIC_DETALLE_MAX,
+        prefer_codes=adj_codes,
+    )
+
     return {
         "fecha": fecha.isoformat(),
         "licitaciones_descargadas": len(listado),
+        "adjudicadas_listadas": len(adjudicadas),
         "licitaciones_insertadas": inserted,
+        "detalle": detalle_stats,
+        "duration_s": round(_time.perf_counter() - t0, 1),
+    }
+
+
+def enrich_licitaciones_detalle(
+    max_detalle: int | None = None,
+    prefer_codes: list[str] | None = None,
+) -> dict[str, Any]:
+    """Descarga detalle MP y persiste adjudicados para licitaciones sin detalle."""
+    from licitaciones_extractor import LicitacionesExtractor
+
+    max_detalle = max_detalle if max_detalle is not None else LIC_DETALLE_MAX
+    codes: list[str] = []
+    for c in prefer_codes or []:
+        if c and c not in codes:
+            codes.append(c)
+
+    if len(codes) < max_detalle:
+        try:
+            with sqlite3.connect(DB_NAME) as conn:
+                _ensure_licitaciones_table(conn)
+                rows = conn.execute(
+                    """
+                    SELECT codigo_externo FROM licitaciones
+                    WHERE COALESCE(tiene_detalle, 0) = 0
+                    ORDER BY
+                        CASE WHEN LOWER(COALESCE(estado, '')) LIKE '%adjudic%' THEN 0 ELSE 1 END,
+                        fecha_extraccion DESC
+                    LIMIT ?
+                    """,
+                    (max_detalle,),
+                ).fetchall()
+            for r in rows:
+                if r[0] and r[0] not in codes:
+                    codes.append(r[0])
+        except sqlite3.Error as exc:
+            logger.warning("No se pudieron listar licitaciones para detalle: %s", exc)
+
+    codes = codes[:max_detalle]
+    if not codes:
+        return {"skipped": True, "reason": "sin licitaciones pendientes"}
+
+    extractor = LicitacionesExtractor()
+    ok = 0
+    adj_nuevos = 0
+    errores = 0
+    for codigo in codes:
+        try:
+            detalle = extractor.extract_by_code(codigo)
+            if not detalle:
+                errores += 1
+                continue
+            adj_nuevos += _store_licitacion_detalle(codigo, detalle)
+            ok += 1
+            _time.sleep(0.4)
+        except Exception as exc:  # noqa: BLE001
+            errores += 1
+            logger.debug("Detalle licitación %s: %s", codigo, exc)
+
+    return {
+        "solicitadas": len(codes),
+        "detalle_ok": ok,
+        "adjudicados_nuevos": adj_nuevos,
+        "errores": errores,
+    }
+
+
+def enrich_missing_ruts(max_ocs: int | None = None) -> dict[str, Any]:
+    """
+    Completa RUTs vacíos: (1) backfill por nombre en BD,
+    (2) re-descarga detalle OC de códigos aún sin RUT.
+    """
+    from extractor import MercadoPublicoExtractor
+    from processor import DataProcessor
+
+    max_ocs = max_ocs if max_ocs is not None else ENRICH_RUT_MAX_OCS
+    t0 = _time.perf_counter()
+    backfilled = 0
+    try:
+        with sqlite3.connect(DB_NAME) as conn:
+            backfilled = conn.execute(
+                """
+                UPDATE ordenes_items
+                SET rut_proveedor = (
+                    SELECT rut_proveedor FROM ordenes_items oi2
+                    WHERE LOWER(oi2.nombre_proveedor) = LOWER(ordenes_items.nombre_proveedor)
+                      AND oi2.rut_proveedor IS NOT NULL
+                      AND TRIM(oi2.rut_proveedor) != ''
+                    LIMIT 1
+                )
+                WHERE (rut_proveedor IS NULL OR TRIM(rut_proveedor) = '')
+                  AND nombre_proveedor IS NOT NULL
+                  AND TRIM(nombre_proveedor) != ''
+                """
+            ).rowcount
+            conn.commit()
+    except sqlite3.Error as exc:
+        logger.warning("Backfill RUT por nombre falló: %s", exc)
+
+    try:
+        with sqlite3.connect(DB_NAME) as conn:
+            rows = conn.execute(
+                """
+                SELECT DISTINCT codigo_oc FROM ordenes_items
+                WHERE (rut_proveedor IS NULL OR TRIM(rut_proveedor) = '')
+                  AND codigo_oc IS NOT NULL AND TRIM(codigo_oc) != ''
+                ORDER BY fecha_creacion DESC
+                LIMIT ?
+                """,
+                (max_ocs,),
+            ).fetchall()
+        codigos = [r[0] for r in rows if r[0]]
+    except sqlite3.Error as exc:
+        return {"error": str(exc), "backfilled_nombre": backfilled}
+
+    if not codigos:
+        return {
+            "backfilled_nombre": backfilled,
+            "skipped_api": True,
+            "reason": "sin OCs con RUT vacío",
+            "duration_s": round(_time.perf_counter() - t0, 1),
+        }
+
+    extractor = MercadoPublicoExtractor()
+    processor = DataProcessor()
+    ordenes: list[dict[str, Any]] = []
+    errores = 0
+    for codigo in codigos:
+        try:
+            detail = extractor.fetch_oc_detail(codigo)
+            if detail:
+                ordenes.append(detail)
+            _time.sleep(0.35)
+        except Exception as exc:  # noqa: BLE001
+            errores += 1
+            logger.debug("Enrich RUT OC %s: %s", codigo, exc)
+
+    ocs_ok, items = processor.refresh_orders(ordenes) if ordenes else (0, 0)
+    return {
+        "backfilled_nombre": backfilled,
+        "ocs_solicitadas": len(codigos),
+        "ocs_refrescadas": ocs_ok,
+        "items_actualizados": items,
+        "errores_api": errores,
+        "duration_s": round(_time.perf_counter() - t0, 1),
+    }
+
+
+def enrich_proveedores_catalog(max_ruts: int | None = None) -> dict[str, Any]:
+    """Enriquece catálogo local con BuscarProveedor (CodigoEmpresa) para RUTs conocidos."""
+    from proveedor_lookup import ProveedorLookup
+
+    max_ruts = max_ruts if max_ruts is not None else ENRICH_PROVEEDOR_MAX
+    t0 = _time.perf_counter()
+    with sqlite3.connect(DB_NAME) as conn:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS proveedores_mp (
+                rut TEXT PRIMARY KEY,
+                nombre_empresa TEXT,
+                codigo_empresa TEXT,
+                raw_json TEXT,
+                fecha_consulta TEXT DEFAULT (datetime('now'))
+            )
+            """
+        )
+        rows = conn.execute(
+            """
+            SELECT DISTINCT rut_proveedor FROM ordenes_items
+            WHERE rut_proveedor IS NOT NULL AND TRIM(rut_proveedor) != ''
+              AND rut_proveedor NOT IN (SELECT rut FROM proveedores_mp)
+            LIMIT ?
+            """,
+            (max_ruts,),
+        ).fetchall()
+    ruts = [r[0] for r in rows if r[0]]
+    if not ruts:
+        return {"skipped": True, "reason": "sin RUTs nuevos"}
+
+    lookup = ProveedorLookup()
+    ok = 0
+    errores = 0
+    with sqlite3.connect(DB_NAME) as conn:
+        for rut in ruts:
+            try:
+                info = lookup.buscar_proveedor(rut)
+                if not info:
+                    errores += 1
+                    continue
+                conn.execute(
+                    """
+                    INSERT OR REPLACE INTO proveedores_mp
+                    (rut, nombre_empresa, codigo_empresa, raw_json, fecha_consulta)
+                    VALUES (?, ?, ?, ?, datetime('now'))
+                    """,
+                    (
+                        rut,
+                        str(info.get("NombreEmpresa") or info.get("Nombre") or "")[:300],
+                        str(info.get("CodigoEmpresa") or info.get("Codigo") or ""),
+                        json.dumps(info, ensure_ascii=False, default=str)[:4000],
+                    ),
+                )
+                ok += 1
+                _time.sleep(0.35)
+            except Exception as exc:  # noqa: BLE001
+                errores += 1
+                logger.debug("BuscarProveedor %s: %s", rut, exc)
+        conn.commit()
+
+    return {
+        "consultados": len(ruts),
+        "guardados": ok,
+        "errores": errores,
         "duration_s": round(_time.perf_counter() - t0, 1),
     }
 
@@ -519,22 +914,25 @@ def resync_recent_orders(days: int | None = None, max_ocs: int | None = None) ->
     }
 
 
+def _days_since_marker(marker: dict[str, Any], key: str) -> float | None:
+    raw = marker.get(key, "")
+    if not raw:
+        return None
+    try:
+        ts = datetime.fromisoformat(str(raw))
+        return (datetime.now(timezone.utc) - ts).total_seconds() / 86400.0
+    except ValueError:
+        return None
+
+
 def update_secondary_sources(force: bool = False) -> dict[str, Any]:
     """SERVEL, CGR e InfoProbidad — fuentes que no corrían en el pipeline diario."""
     stats: dict[str, Any] = {}
     marker = read_marker()
-    last_servel = marker.get("servel_utc", "")
 
     # SERVEL — semanal
-    run_servel = force
-    if not run_servel and last_servel:
-        try:
-            ts = datetime.fromisoformat(last_servel)
-            run_servel = (datetime.now(timezone.utc) - ts).days >= SERVEL_REFRESH_DAYS
-        except ValueError:
-            run_servel = True
-    else:
-        run_servel = True
+    days_servel = _days_since_marker(marker, "servel_utc")
+    run_servel = force or days_servel is None or days_servel >= SERVEL_REFRESH_DAYS
 
     if run_servel:
         try:
@@ -549,7 +947,7 @@ def update_secondary_sources(force: bool = False) -> dict[str, Any]:
             logger.warning("Error cargando SERVEL: %s", exc)
             stats["servel"] = {"error": str(exc)}
     else:
-        stats["servel"] = {"skipped": True}
+        stats["servel"] = {"skipped": True, "days_since": round(days_servel or 0, 1)}
 
     try:
         from contraloria_connector import ContraloriaConnector
@@ -564,14 +962,29 @@ def update_secondary_sources(force: bool = False) -> dict[str, Any]:
         logger.warning("Error CGR: %s", exc)
         stats["cgr"] = {"error": str(exc)}
 
-    try:
-        from infoprobidad_connector import InfoProbidadConnector
+    # InfoProbidad — sync SPARQL semanal desde top OC
+    days_ip = _days_since_marker(marker, "infoprobidad_utc")
+    run_ip = force or days_ip is None or days_ip >= INFOPROBIDAD_REFRESH_DAYS
+    if run_ip:
+        try:
+            from infoprobidad_connector import InfoProbidadConnector
 
-        ip = InfoProbidadConnector(DB_NAME)
-        stats["infoprobidad"] = {"mode": "live_on_demand", "endpoint": "datos.cplt.cl/sparql"}
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("Error InfoProbidad: %s", exc)
-        stats["infoprobidad"] = {"error": str(exc)}
+            ip = InfoProbidadConnector(DB_NAME)
+            sync_stats = ip.sync_desde_ordenes(
+                top_proveedores=INFOPROBIDAD_TOP_PROV,
+                top_organismos=INFOPROBIDAD_TOP_ORG,
+            )
+            stats["infoprobidad"] = {"mode": "sync_desde_ordenes", **sync_stats}
+            marker["infoprobidad_utc"] = datetime.now(timezone.utc).isoformat()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Error InfoProbidad: %s", exc)
+            stats["infoprobidad"] = {"error": str(exc)}
+    else:
+        stats["infoprobidad"] = {
+            "skipped": True,
+            "days_since": round(days_ip or 0, 1),
+            "mode": "cached_local",
+        }
 
     try:
         from case_review import init_review_tables
@@ -581,7 +994,10 @@ def update_secondary_sources(force: bool = False) -> dict[str, Any]:
     except Exception as exc:  # noqa: BLE001
         stats["case_review"] = {"error": str(exc)}
 
-    _write_marker({**marker, **stats})
+    # Persistir timestamps sin pisar stats de la corrida OC
+    marker_out = {**marker}
+    marker_out["secondary_last"] = stats
+    _write_marker(marker_out)
     return stats
 
 
@@ -661,19 +1077,28 @@ def update_all(
             logger.exception("Error update_licitaciones")
             stats["licitaciones"] = {"error": str(exc)}
 
+        # Enriquecimiento OC: RUTs faltantes + catálogo BuscarProveedor
+        try:
+            stats["enrich_ruts"] = enrich_missing_ruts(max_ocs=ENRICH_RUT_MAX_OCS)
+        except Exception as exc:  # noqa: BLE001
+            stats["enrich_ruts"] = {"error": str(exc)}
+        try:
+            stats["enrich_proveedores"] = enrich_proveedores_catalog(
+                max_ruts=ENRICH_PROVEEDOR_MAX,
+            )
+        except Exception as exc:  # noqa: BLE001
+            stats["enrich_proveedores"] = {"error": str(exc)}
+
         if full and not BACKFILL_ENABLED:
             try:
                 stats["resync"] = resync_recent_orders()
             except Exception as exc:  # noqa: BLE001
                 stats["resync"] = {"error": str(exc)}
+
+        # Fuentes secundarias en --full (SERVEL/CGR/InfoProbidad respetan sus propios caducidades)
+        if full:
             try:
                 stats["secondary"] = update_secondary_sources(force=force)
-            except Exception as exc:  # noqa: BLE001
-                stats["secondary"] = {"error": str(exc)}
-        elif full and BACKFILL_ENABLED:
-            # En modo lento, fuentes secundarias ocasionales (no cada lote)
-            try:
-                stats["secondary"] = update_secondary_sources(force=False)
             except Exception as exc:  # noqa: BLE001
                 stats["secondary"] = {"error": str(exc)}
 

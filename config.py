@@ -95,6 +95,13 @@ SCHEDULE_EVERY_HOURS: float = float(os.getenv("SCHEDULE_EVERY_HOURS", "12"))
 # Re-sincronizar OCs recientes (corrige montos/organismos desactualizados)
 RESYNC_RECENT_DAYS: int = int(os.getenv("RESYNC_RECENT_DAYS", "30"))
 RESYNC_MAX_OCS: int = int(os.getenv("RESYNC_MAX_OCS", "200"))
+# Fuentes secundarias / enriquecimiento
+INFOPROBIDAD_REFRESH_DAYS: int = int(os.getenv("INFOPROBIDAD_REFRESH_DAYS", "7"))
+INFOPROBIDAD_TOP_PROV: int = int(os.getenv("INFOPROBIDAD_TOP_PROV", "40"))
+INFOPROBIDAD_TOP_ORG: int = int(os.getenv("INFOPROBIDAD_TOP_ORG", "12"))
+ENRICH_RUT_MAX_OCS: int = int(os.getenv("ENRICH_RUT_MAX_OCS", "60"))
+ENRICH_PROVEEDOR_MAX: int = int(os.getenv("ENRICH_PROVEEDOR_MAX", "40"))
+LIC_DETALLE_MAX: int = int(os.getenv("LIC_DETALLE_MAX", "25"))
 # Búsqueda web IA: tavily > brave > duckduckgo
 TAVILY_API_KEY: str = os.getenv("TAVILY_API_KEY", "")
 BRAVE_SEARCH_API_KEY: str = os.getenv("BRAVE_SEARCH_API_KEY", "")
